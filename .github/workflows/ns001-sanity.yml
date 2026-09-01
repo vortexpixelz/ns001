@@ -1,28 +1,71 @@
-name: NS-001 JHTDB sanity
+name: NS-001 reproducibility
 
 on:
   push:
     paths:
+      - "Dockerfile"
+      - "requirements.txt"
+      - "Makefile"
+      - "ns001_tau_check.py"
+      - "run_experiment.py"
+      - "protocols/**"
       - ".github/workflows/ns001-sanity.yml"
   workflow_dispatch:
 
 jobs:
-  sanity:
+  container-reproduction:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Build pinned NS-001 image
+        run: |
+          docker build \
+            --build-arg VCS_REF="${GITHUB_SHA}" \
+            -t "ns001:${GITHUB_SHA}" .
 
-      - name: Install NumPy
-        run: python -m pip install --disable-pip-version-check numpy
-
-      - name: Run one-frame JHTDB sanity check
+      - name: Replay public-token sanity protocol
         env:
           JHTDB_TOKEN: edu.jhu.pha.turbulence.testing-201406
-        run: python ns001_tau_check.py --sanity-only --box 12
+        run: |
+          mkdir -p outputs/sanity
+          docker run --rm \
+            -e JHTDB_TOKEN \
+            -e NS001_CONTAINER_IMAGE="ns001:${GITHUB_SHA}" \
+            -v "${PWD}/outputs:/outputs" \
+            "ns001:${GITHUB_SHA}" \
+            protocols/sanity.json --output-dir /outputs/sanity
+
+      - name: Replay public-token temporal smoke protocol
+        env:
+          JHTDB_TOKEN: edu.jhu.pha.turbulence.testing-201406
+        run: |
+          mkdir -p outputs/smoke
+          docker run --rm \
+            -e JHTDB_TOKEN \
+            -e NS001_CONTAINER_IMAGE="ns001:${GITHUB_SHA}" \
+            -v "${PWD}/outputs:/outputs" \
+            "ns001:${GITHUB_SHA}" \
+            protocols/smoke.json --output-dir /outputs/smoke
+
+      - name: Verify receipts exist
+        run: |
+          test -s outputs/sanity/receipt.json
+          test -s outputs/smoke/receipt.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for p in [Path('outputs/sanity/receipt.json'), Path('outputs/smoke/receipt.json')]:
+              r = json.loads(p.read_text())
+              print(p, r['experiment']['name'], r['artifacts']['M_of_t_sha256'], r['result'])
+          PY
+
+      - name: Upload reproducibility receipts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ns001-repro-${{ github.sha }}
+          path: outputs/
+          if-no-files-found: error
+          retention-days: 30
