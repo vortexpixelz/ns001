@@ -1,0 +1,28 @@
+name: NS-001 JHTDB sanity
+
+on:
+  push:
+    paths:
+      - ".github/workflows/ns001-sanity.yml"
+  workflow_dispatch:
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install NumPy
+        run: python -m pip install --disable-pip-version-check numpy
+
+      - name: Run one-frame JHTDB sanity check
+        env:
+          JHTDB_TOKEN: edu.jhu.pha.turbulence.testing-201406
+        run: python ns001_tau_check.py --sanity-only --box 12
