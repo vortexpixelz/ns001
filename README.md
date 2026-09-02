@@ -1,4 +1,6 @@
 # NS-001
+> [!IMPORTANT]
+> **Current status — 2026-09-02:** The temporal fixed-sub-box design documented below is preserved as a superseded protocol and is not authorized for execution. The active prospective experiment is [E0 Stride Refinement](preregistrations/e0/NS-001_E0_STRIDE_REFINEMENT_PREREG_FROZEN_2026-09-02.md). Sanity is complete; E0 has not run. Do not run the legacy `make sanity`, `make smoke`, or `make day-one` targets. Required order: verify the frozen hash, approve the exact execution manifest, run E0, then stop.
 
 Time-first feasibility test for extreme-value analysis of vorticity in JHTDB turbulence DNS.
 
