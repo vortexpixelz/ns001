@@ -1,0 +1,59 @@
+{
+  "phase": "H2A1_EXTERNAL_ANCHORS_ONLY",
+  "anchors": [
+    {
+      "anchor": "h1_checkpoint_commit",
+      "expected": "6e33cb9ca7019e50e2f247ade9ae8c9a7b40d3ff",
+      "status": "VERIFIED",
+      "source": "/home/jacob/Documents/NS-001/repo Git commit object 6e33cb9ca7019e50e2f247ade9ae8c9a7b40d3ff",
+      "observed": "6e33cb9ca7019e50e2f247ade9ae8c9a7b40d3ff",
+      "byte_count": 253,
+      "raw_sha256": "875743e5a52a4fe6f0b3f834f62a5a9119defbedc17ebee23bcbbaf15b42296d",
+      "observed_head": "a6156e98888c75c8cbdebb55dd598e85e9c243b2",
+      "reason": "raw identity and ancestry match"
+    },
+    {
+      "anchor": "scientific_base_commit",
+      "expected": "0393315223df8ed90f20f0c821508cc98bea08d1",
+      "status": "VERIFIED",
+      "source": "/home/jacob/Documents/NS-001/repo Git commit object 0393315223df8ed90f20f0c821508cc98bea08d1",
+      "observed": "0393315223df8ed90f20f0c821508cc98bea08d1",
+      "byte_count": 271,
+      "raw_sha256": "943d1b94830de6d7031f48e94b9cabab9f03c02ce69f30454037b49f260faf52",
+      "observed_head": "a6156e98888c75c8cbdebb55dd598e85e9c243b2",
+      "reason": "raw identity and ancestry match"
+    },
+    {
+      "anchor": "frozen_preregistration_sha256",
+      "expected": "a2a8523c065d4d41155aa29d367c888d49ab3032f6075b8cebbd2475ff1efd78",
+      "status": "VERIFIED",
+      "source": "/home/jacob/Documents/NS-001/repo/preregistrations/e0/NS-001_E0_STRIDE_REFINEMENT_PREREG_FROZEN_2026-09-02.md",
+      "observed": "a2a8523c065d4d41155aa29d367c888d49ab3032f6075b8cebbd2475ff1efd78",
+      "byte_count": 9923,
+      "reason": "file and both historical blobs match"
+    },
+    {
+      "anchor": "h1_audit_bundle_sha256",
+      "expected": "a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f",
+      "status": "VERIFIED",
+      "source": "/home/jacob/Documents/NS-001/audit/2026-09-03/NS001_H1_AUDIT_BUNDLE_20260903.zip",
+      "observed": "a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f",
+      "byte_count": 51103,
+      "reason": "independently read retained archive digest matches"
+    }
+  ],
+  "h2a1_verdict": "VERIFIED",
+  "overall_status": "HOLD",
+  "unresolved_h2_gates": [
+    "external_trust_root",
+    "client_source",
+    "response_contract",
+    "transport_accounting",
+    "dependency_runtime_lock",
+    "maximum_partition_memory",
+    "amendment_freeze",
+    "final_manifest_package_audit"
+  ],
+  "substantive_gate_resolved": false,
+  "e0_authorized": false
+}
