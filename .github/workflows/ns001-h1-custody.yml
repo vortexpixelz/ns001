@@ -1,0 +1,168 @@
+name: NS-001 exact H1 custody (manual only)
+
+# Dispatch is a future, separately authorized act. Never run scientific code.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Previously approved immutable release tag
+        required: true
+        type: string
+      publication_commit:
+        description: Approved full commit SHA to which that tag must resolve
+        required: true
+        type: string
+      provenance_sha256:
+        description: Approved SHA-256 of NS001_H1_PUBLICATION_PROVENANCE.json
+        required: true
+        type: string
+      authorization:
+        description: Enter ATTEST-EXACT-H1 only after separate execution authorization
+        required: true
+        type: string
+
+permissions: {}
+concurrency:
+  group: ns001-exact-h1-custody
+  cancel-in-progress: false
+
+jobs:
+  custody:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository_id == '1354037143' &&
+      github.repository == 'vortexpixelz/ns001' &&
+      github.actor_id == '202687650' &&
+      github.triggering_actor == 'vortexpixelz' &&
+      github.run_attempt == 1 &&
+      inputs.authorization == 'ATTEST-EXACT-H1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Verify immutable source, exact ZIP and approved provenance
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PUBLICATION_COMMIT: ${{ inputs.publication_commit }}
+          PROVENANCE_SHA256: ${{ inputs.provenance_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, urllib.parse, urllib.request
+          from datetime import datetime, timezone
+
+          repo = 'vortexpixelz/ns001'
+          filename = 'NS001_H1_AUDIT_BUNDLE_20260903.zip'
+          digest = 'a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f'
+          source = '6e33cb9ca7019e50e2f247ade9ae8c9a7b40d3ff'
+          adoption = 'cd6e3eb806fa5a5045daaf35904ea927cec68f55'
+          tag = os.environ['RELEASE_TAG']
+          commit = os.environ['PUBLICATION_COMMIT']
+          pdigest = os.environ['PROVENANCE_SHA256']
+          def require(ok, message):
+              if not ok:
+                  raise SystemExit(message)
+          require(bool(re.fullmatch(r'[0-9a-f]{40}', commit)), 'Full commit required')
+          require(bool(re.fullmatch(r'[0-9a-f]{64}', pdigest)), 'Provenance digest required')
+          require(bool(tag) and len(tag) <= 200, 'Tag required')
+          def api(path):
+              # Anonymous reads only; never send runner tokens to download redirects.
+              req = urllib.request.Request('https://api.github.com/repos/' + repo + path,
+                                           headers={'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  data = response.read(1048577)
+              require(len(data) <= 1048576, 'Oversized API response')
+              return json.loads(data)
+          require(api('')['id'] == 1354037143 and api('')['private'] is False,
+                  'Wrong/private repository')
+          release = api('/releases/tags/' + urllib.parse.quote(tag, safe=''))
+          require(release.get('immutable') is True and release.get('draft') is False,
+                  'Published immutable release required')
+          require(release['tag_name'] == tag, 'Tag mismatch')
+          ref = api('/git/ref/tags/' + urllib.parse.quote(tag, safe=''))['object']
+          for _ in range(8):
+              if ref['type'] == 'commit':
+                  break
+              require(ref['type'] == 'tag', 'Invalid tag target')
+              ref = api('/git/tags/' + ref['sha'])['object']
+          require(ref['type'] == 'commit' and ref['sha'] == commit, 'Commit mismatch')
+          directory = pathlib.Path('custody')
+          directory.mkdir(exist_ok=False)
+          def download(name, expected_digest, size=None):
+              matches = [a for a in release['assets'] if a['name'] == name]
+              require(len(matches) == 1, 'Missing/duplicate asset: ' + name)
+              asset = matches[0]
+              require(asset['state'] == 'uploaded', 'Asset not uploaded')
+              require(asset['uploader']['id'] == 202687650, 'Unexpected asset uploader')
+              limit = size if size is not None else 65536
+              require(0 < asset['size'] <= limit, 'Asset size out of bounds')
+              if size is not None:
+                  require(asset['size'] == size, 'Wrong ZIP size')
+              expected_url = ('https://github.com/' + repo + '/releases/download/' +
+                              urllib.parse.quote(tag, safe='') + '/' + name)
+              require(asset['browser_download_url'] == expected_url, 'Wrong download locator')
+              with urllib.request.urlopen(expected_url, timeout=30) as response:
+                  require(response.geturl().startswith('https://'), 'Insecure redirect')
+                  raw = response.read(limit + 1)
+              require(len(raw) == asset['size'] and len(raw) <= limit, 'Byte count mismatch')
+              require(hashlib.sha256(raw).hexdigest() == expected_digest, 'Digest mismatch')
+              (directory / name).write_bytes(raw)
+              return asset, raw
+          asset, _ = download(filename, digest, 51103)
+          provenance_asset, raw = download('NS001_H1_PUBLICATION_PROVENANCE.json', pdigest)
+          provenance = json.loads(raw)
+          expected = {
+              'schema': 'ns001.h1.publication-provenance.v1',
+              'repository_id': 1354037143, 'publisher_account_id': 202687650,
+              'artifact_name': filename, 'artifact_size': 51103, 'artifact_sha256': digest,
+              'h1_source_commit': source, 'mandate_adoption_commit': adoption,
+              'publication_commit': commit, 'release_tag': tag,
+              'historical_custody_established': False, 'e0_status': 'HOLD',
+              'h2a2_status': 'UNSTARTED'
+          }
+          require(all(k in provenance and type(provenance[k]) is type(v) and
+                      provenance[k] == v for k, v in expected.items()),
+                  'Provenance identity/scope mismatch')
+          predicate = {
+              'operation': 'verify-existing-published-bytes-not-build',
+              'artifact': expected,
+              'provenance_sha256': pdigest,
+              'provenance_asset_id': provenance_asset['id'],
+              'release_id': release['id'], 'release_published_at': release['published_at'],
+              'asset_id': asset['id'], 'asset_created_at': asset['created_at'],
+              'uploader_account_id': asset['uploader']['id'],
+              'observed_at': datetime.now(timezone.utc).isoformat(),
+              'workflow_ref': os.environ['GITHUB_WORKFLOW_REF'],
+              'workflow_sha': os.environ['GITHUB_WORKFLOW_SHA'],
+              'actor_id': os.environ['GITHUB_ACTOR_ID'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'limitations': 'Prospective retrieval observation only; no historical custody, '
+                             'authorship, corporate certification, scientific claim or E0 authorization.'
+          }
+          pathlib.Path('custody-predicate.json').write_text(json.dumps(predicate, sort_keys=True))
+          PY
+      - name: Attest only the two verified exact files
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4 resolved during preparation
+        with:
+          subject-path: |
+            custody/NS001_H1_AUDIT_BUNDLE_20260903.zip
+            custody/NS001_H1_PUBLICATION_PROVENANCE.json
+          predicate-type: https://github.com/vortexpixelz/ns001/predicates/h1-custody/v1
+          predicate-path: custody-predicate.json
+          push-to-registry: false
+          create-storage-record: false
+      - name: Report verification bundle location
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$BUNDLE_PATH"
+          printf 'Attestation: %s\n' "$ATTESTATION_URL" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Bundle SHA-256: ' >> "$GITHUB_STEP_SUMMARY"
+          sha256sum "$BUNDLE_PATH" >> "$GITHUB_STEP_SUMMARY"
