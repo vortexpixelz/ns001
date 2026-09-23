@@ -65,6 +65,23 @@ jobs:
           def require(ok, message):
               if not ok:
                   raise SystemExit(message)
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  require(key not in result, 'Duplicate JSON key: ' + key)
+                  result[key] = value
+              return result
+          def parse_json(raw):
+              return json.loads(raw, object_pairs_hook=unique_object)
+          def require_timestamp(value, field):
+              # GitHub REST service timestamps: UTC, second precision, trailing Z.
+              require(type(value) is str and re.fullmatch(
+                  r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', value),
+                  'Missing/invalid timestamp: ' + field)
+              try:
+                  datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ')
+              except ValueError:
+                  raise SystemExit('Unusable timestamp: ' + field)
           require(bool(re.fullmatch(r'[0-9a-f]{40}', commit)), 'Full commit required')
           require(bool(re.fullmatch(r'[0-9a-f]{64}', pdigest)), 'Provenance digest required')
           require(bool(tag) and len(tag) <= 200, 'Tag required')
@@ -75,13 +92,14 @@ jobs:
               with urllib.request.urlopen(req, timeout=30) as response:
                   data = response.read(1048577)
               require(len(data) <= 1048576, 'Oversized API response')
-              return json.loads(data)
+              return parse_json(data)
           require(api('')['id'] == 1354037143 and api('')['private'] is False,
                   'Wrong/private repository')
           release = api('/releases/tags/' + urllib.parse.quote(tag, safe=''))
           require(release.get('immutable') is True and release.get('draft') is False,
                   'Published immutable release required')
           require(release['tag_name'] == tag, 'Tag mismatch')
+          require_timestamp(release.get('published_at'), 'release.published_at')
           ref = api('/git/ref/tags/' + urllib.parse.quote(tag, safe=''))['object']
           for _ in range(8):
               if ref['type'] == 'commit':
@@ -112,8 +130,9 @@ jobs:
               (directory / name).write_bytes(raw)
               return asset, raw
           asset, _ = download(filename, digest, 51103)
+          require_timestamp(asset.get('created_at'), 'H1 asset.created_at')
           provenance_asset, raw = download('NS001_H1_PUBLICATION_PROVENANCE.json', pdigest)
-          provenance = json.loads(raw)
+          provenance = parse_json(raw)
           expected = {
               'schema': 'ns001.h1.publication-provenance.v1',
               'repository_id': 1354037143, 'publisher_account_id': 202687650,
