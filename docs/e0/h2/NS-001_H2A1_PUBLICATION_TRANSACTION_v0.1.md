@@ -334,3 +334,72 @@ The commit containing this continuation pins its bytes; remote retrieval is chec
 - E0 HOLD; H2A2 UNSTARTED; Gate 1 unchanged/PARTIAL.
 - One next bounded action: obtain separate authorization to finalize this exact verified
   draft after fresh checks. Do not finalize or dispatch within this circuit.
+
+
+## Authorized existing-draft finalization — successful publication
+
+### FROZEN BEFORE FINALIZATION
+
+Preparation HEAD `f92e3134be8cf0d3d3863b3bdd43b7ee69aecfcc`.
+The user authorized only publication of existing draft 396003416. Fresh preflight PASS:
+draft/unpublished state, tag `ns001-h1-audit-v1`, frozen target
+`d9dcfbef1bea173b316bc968fd71421c982422c3`, exactly the two verified assets, IDs/names/
+sizes/service digests, unchanged frozen body/title and tag-trigger exclusion all match.
+Main unchanged; same four existing workflow runs; pre-mutation digest attestation lookups
+returned HTTP 404 (bounded observations). Pinned verifier binary identity matches.
+All prior STOP/failure/upload history remains preserved verbatim.
+
+### OBSERVED DURING FINALIZATION
+
+Exactly one API mutation: PATCH `/repos/vortexpixelz/ns001/releases/396003416`, body
+`{"draft": false}`, using the pinned official gh 2.101.0 binary. No other request
+field was supplied. No retry, object recreation, upload, replacement, settings change
+or workflow dispatch occurred.
+
+Immediate release-ID readback:
+
+- Release ID: `396003416`; draft: false; published: YES.
+- Canonical locator: https://github.com/vortexpixelz/ns001/releases/tag/ns001-h1-audit-v1
+- Tag: `ns001-h1-audit-v1`; target commit: `d9dcfbef1bea173b316bc968fd71421c982422c3`.
+- Service created_at: `2026-09-24T17:00:40Z`; published_at: `2026-09-24T19:52:11Z`.
+- Release author: `vortexpixelz`, account ID `202687650`.
+- Immutable: `true` (observed GitHub field).
+- Title, body, target, tag, asset IDs/names/labels/bytes and uploader identities unchanged.
+
+Complete two-asset inventory:
+
+| ID | Filename | Bytes | Service SHA-256 | Uploader / ID | Asset created_at | Public browser_download_url |
+| --- | --- | --- | --- | --- | --- | --- |
+| 586661162 | NS001_H1_AUDIT_BUNDLE_20260903.zip | 51103 | sha256:a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f | vortexpixelz / 202687650 | 2026-09-24T19:26:50Z | https://github.com/vortexpixelz/ns001/releases/download/ns001-h1-audit-v1/NS001_H1_AUDIT_BUNDLE_20260903.zip |
+| 586661207 | NS001_H1_PUBLICATION_PROVENANCE.json | 2298 | sha256:ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12 | vortexpixelz / 202687650 | 2026-09-24T19:26:51Z | https://github.com/vortexpixelz/ns001/releases/download/ns001-h1-audit-v1/NS001_H1_PUBLICATION_PROVENANCE.json |
+
+### VERIFIED AFTER PUBLICATION
+
+Fresh anonymous public downloads, with no GitHub credential or draft download path,
+returned HTTP 200 and matched exact frozen sizes/digests:
+
+- ZIP: 51103 bytes; SHA-256 `a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f`.
+- Provenance: 2298 bytes; SHA-256 `ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12`.
+
+Final HTTPS redirect host was `release-assets.githubusercontent.com` for both.
+No expiring URL query credentials are preserved. Public retrieval observations and
+complete raw service metadata are added under the existing evidence history's
+`draft-finalization/` subdirectory. This is a stage record, not the final custody deposit.
+
+Run inventory still contains only IDs 34488406675, 33563351013, 33563214294 and
+33562657929. No scientific sanity run or custody run was triggered by publication.
+No custody attestation was requested/created by this circuit. GitHub's automatic
+immutable-release mechanisms are distinct and are not verified by this stage.
+Main remains unchanged. Existing scientific artifacts and earlier evidence bytes remain
+unchanged; only this receipt is appended and finalization observations added.
+
+- Fresh preflight: PASS; publication mutation attempted: YES, once; succeeded.
+- Public retrieval verdict: PASS for both exact assets.
+- Scientific workflow unexpectedly triggered: NO (observed inventories).
+- Custody workflow dispatched: NO; custody attestation created: NO.
+- Final custody evidence deposit: NOT CREATED.
+- H2A1: external auditability PARTIAL; published byte identity/retrievability verified,
+  custody/signature and final audit work remain incomplete.
+- E0 HOLD; H2A2 UNSTARTED; Gate 1 remains PARTIAL and unadvanced.
+- One next bounded action: obtain separate authorization for fresh custody preflight
+  and exactly one dispatch of the frozen workflow. Do not perform it in this circuit.
