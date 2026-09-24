@@ -1,0 +1,32 @@
+from pathlib import Path
+import subprocess,json,datetime,hashlib
+D=Path('/tmp/ns001-authorized-publication-20260924');gh='/home/jacob/.local/opt/ns001-gh/2.101.0/gh';repo='repos/vortexpixelz/ns001';target='d9dcfbef1bea173b316bc968fd71421c982422c3';tag='ns001-h1-audit-v1'
+receipt=Path('docs/e0/h2/NS-001_H2A1_PUBLICATION_TRANSACTION_v0.1.md')
+def call(name,args,data=None):
+ assert not (D/(name+'.json')).exists(), 'No retry permitted'
+ cmd=[gh,'api',*args]
+ if data is not None:
+  p=D/(name+'-request.json');p.write_text(json.dumps(data));cmd+=['--input',str(p)]
+ r=subprocess.run(cmd,capture_output=True);(D/(name+'.json')).write_bytes(r.stdout);(D/(name+'.stderr')).write_bytes(r.stderr)
+ with receipt.open('a') as f:f.write('\n- '+datetime.datetime.now(datetime.timezone.utc).isoformat()+' '+name+': exit '+str(r.returncode)+'.\n')
+ assert r.returncode==0,(name,r.stderr.decode())
+ return json.loads(r.stdout)
+try:
+ assert call('immediate-main-check',[repo+'/git/ref/heads/main'])['object']['sha']==target
+ tagobj=call('tag-created',[repo+'/git/refs','--method','POST'],{'ref':'refs/tags/'+tag,'sha':target});assert tagobj['object']['sha']==target
+ r=call('draft-created',[repo+'/releases','--method','POST'],{'tag_name':tag,'target_commitish':target,'name':'NS-001 H1 mock-only audit bundle v1','body':(D/'release-body.txt').read_text(),'draft':True,'prerelease':False,'make_latest':'false'})
+ rid=r['id'];assert r['draft'] is True and r['author']['id']==202687650
+ for name,ctype in [('NS001_H1_AUDIT_BUNDLE_20260903.zip','application/zip'),('NS001_H1_PUBLICATION_PROVENANCE.json','application/json')]:
+  asset=call('upload-'+name,['--hostname','uploads.github.com',repo+'/releases/'+str(rid)+'/assets?name='+name,'--method','POST','--header','Content-Type: '+ctype,'--input',str(D/name)])
+  assert asset['name']==name and asset['size']==(D/name).stat().st_size and asset['uploader']['id']==202687650
+  assert asset['digest']=='sha256:'+hashlib.sha256((D/name).read_bytes()).hexdigest()
+ draft=call('draft-readback',[repo+'/releases/'+str(rid)])
+ assert draft['draft'] is True and draft['body']==(D/'release-body.txt').read_text() and len(draft['assets'])==2
+ assert {a['name'] for a in draft['assets']}=={'NS001_H1_AUDIT_BUNDLE_20260903.zip','NS001_H1_PUBLICATION_PROVENANCE.json'}
+ pub=call('release-finalized',[repo+'/releases/'+str(rid),'--method','PATCH'],{'draft':False,'make_latest':'false'})
+ assert pub['draft'] is False and pub['immutable'] is True and pub['tag_name']==tag
+ print(json.dumps({'release_id':rid,'url':pub['html_url'],'published_at':pub['published_at'],'assets':[{'id':a['id'],'name':a['name'],'url':a['browser_download_url'],'uploader':a['uploader']['login'],'created_at':a['created_at']} for a in pub['assets']]},indent=2))
+except Exception as e:
+ (D/'STOP.txt').write_text(repr(e)+'\n')
+ with receipt.open('a') as f:f.write('\n**STOP AND PRESERVE STATE:** '+repr(e)+'\nNo retry, deletion, replacement or dispatch authorized by this failure.\n')
+ raise
