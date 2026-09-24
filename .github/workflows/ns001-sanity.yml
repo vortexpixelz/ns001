@@ -2,6 +2,10 @@ name: NS-001 reproducibility
 
 on:
   push:
+    branches:
+      - '**'
+    tags-ignore:
+      - 'ns001-h1-audit-v1'
     paths:
       - "Dockerfile"
       - "requirements.txt"
