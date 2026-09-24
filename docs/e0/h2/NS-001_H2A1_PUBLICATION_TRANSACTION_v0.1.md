@@ -403,3 +403,79 @@ unchanged; only this receipt is appended and finalization observations added.
 - E0 HOLD; H2A2 UNSTARTED; Gate 1 remains PARTIAL and unadvanced.
 - One next bounded action: obtain separate authorization for fresh custody preflight
   and exactly one dispatch of the frozen workflow. Do not perform it in this circuit.
+
+
+## Separately authorized single custody dispatch — SUCCESS
+
+### Prior interrupted preflight and new authorization
+
+The preceding attempted preflight did not dispatch: its repository read used an
+erroneous trailing slash and returned 404. A follow-up read was not executed because
+automatic approval review reached its usage limit. This was not an unsafe-action
+finding. The user then explicitly authorized a fresh preflight and one dispatch.
+No prior dispatch occurred; fresh workflow-specific inventory confirmed total_count=0.
+All historical STOP/failure sections above remain unchanged.
+
+### FROZEN / OBSERVED BEFORE DISPATCH
+
+Preparation HEAD `e6a14d2cfea74ff1da8ea36942c05cce90e4e1fa`; clean tree.
+Fresh preflight PASS at `2026-09-24T23:21:43.328056+00:00`:
+release 396003416 published and immutable; tag `ns001-h1-audit-v1` and current main
+both resolve to `d9dcfbef1bea173b316bc968fd71421c982422c3`. Exactly the same two assets
+remain: 586661162 / ZIP / 51103 bytes and 586661207 / provenance / 2298 bytes.
+Service digests and fresh anonymous downloads match respectively:
+`a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f` and
+`ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12`.
+Downloaded provenance equals the re-freeze bytes. Required observed publication and
+asset timestamps are usable; uploader IDs match 202687650. No values were invented
+or inserted into frozen provenance. Custody workflow digest matches
+`236b8f30a27fa1c3c26f134c794f2e3e989b9b31d1e3adfbcfae18e21fa420bf`, and its trigger is
+manual-only. Exact workflow bytes preserve previously reviewed validation/permissions.
+Prior custody run count: 0. Pinned gh 2.101.0 binary hash verified.
+
+### EXACTLY ONE DISPATCH
+
+One POST to `/repos/vortexpixelz/ns001/actions/workflows/ns001-h1-custody.yml/dispatches`
+returned HTTP 204. Canonical submitted request (UTF-8/LF, final LF):
+
+```json
+{
+  "inputs": {
+    "authorization": "ATTEST-EXACT-H1",
+    "provenance_sha256": "ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12",
+    "publication_commit": "d9dcfbef1bea173b316bc968fd71421c982422c3",
+    "release_tag": "ns001-h1-audit-v1"
+  },
+  "ref": "main"
+}
+```
+
+The four input names are taken directly from the frozen workflow. All are frozen
+values; observed service metadata is fetched by the workflow, not additional invented
+inputs. No release/tag/asset/workflow/settings mutation or retry occurred.
+
+### OBSERVED RUN RESULT
+
+- Run ID: `36072331955`; URL: https://github.com/vortexpixelz/ns001/actions/runs/36072331955
+- Actor and triggering actor: `vortexpixelz`, account ID `202687650`.
+- Workflow path: `.github/workflows/ns001-h1-custody.yml`.
+- Dispatch ref: `main`; workflow ref: `vortexpixelz/ns001/.github/workflows/ns001-h1-custody.yml@refs/heads/main`.
+- Observed run head commit: `d9dcfbef1bea173b316bc968fd71421c982422c3` (matches verified main/workflow commit).
+- Event: `workflow_dispatch`; attempt: `1`.
+- Run created_at / run_started_at: `2026-09-24T23:21:44Z` / `2026-09-24T23:21:44Z`.
+- Sole custody job ID: `107875887096`; job started_at: `2026-09-24T23:21:48Z`;
+  completed_at: `2026-09-24T23:21:53Z`.
+- Run status / final conclusion: `completed` / `success`; run updated_at: `2026-09-24T23:21:53Z`.
+- Completion time above is the explicit job completed_at; run updated_at is recorded
+  separately, not silently relabeled as a service run-completion field.
+
+Successful run metadata is observed evidence of execution, not independent signature
+verification. The authorized workflow's attestation step succeeded. No attestation
+bundle was retrieved, no offline verification performed, and no additional attestation
+or workflow run was requested. No final evidence deposit was created or completed.
+This stage updates only the existing transaction receipt, preserving prior history.
+H2A1 external auditability remains PARTIAL pending retrieval/verification and durable
+custody evidence; E0 HOLD, H2A2 UNSTARTED, Gate 1 PARTIAL and unchanged.
+
+One next bounded action: separately authorize retrieval and preservation of the existing
+run's attestation verification material; do not generate another attestation or rerun.
