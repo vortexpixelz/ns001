@@ -479,3 +479,36 @@ custody evidence; E0 HOLD, H2A2 UNSTARTED, Gate 1 PARTIAL and unchanged.
 
 One next bounded action: separately authorize retrieval and preservation of the existing
 run's attestation verification material; do not generate another attestation or rerun.
+
+
+## Authorized existing-attestation retrieval and offline verification — PASS
+
+Starting preparation HEAD `a191990ba33922fcacea79005608e74dafee6dd2`; clean tree.
+Existing run `36072331955` freshly verified completed/SUCCESS, attempt 1, expected
+workflow commit `d9dcfbef1bea173b316bc968fd71421c982422c3`. No rerun or signing.
+
+Evidence directory: `docs/e0/h2/evidence/ns001-h1-audit-v1-publication-stop-20260924/attestation-verification`.
+Original bundle: `sha256:a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f.jsonl`; SHA-256 `6e90aa97a0effa34e73a5c12acc3e96fefb032e5f1ea95eb4dbeaad00e13927b`.
+Trusted root: `trusted_root.jsonl`; SHA-256 `65ca537f6ed8a47fd0e560c421baa1f6c1efb8b25fc200d8c5c02c0e92eb2b9c`.
+Published ZIP: SHA-256 `a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f`.
+Repository `vortexpixelz/ns001` / ID 1354037143; signer
+`https://github.com/vortexpixelz/ns001/.github/workflows/ns001-h1-custody.yml@refs/heads/main`; issuer `https://token.actions.githubusercontent.com`.
+Signer/source commit matches the workflow commit above. Verified certificate run URL
+ends `/36072331955/attempts/1`; Rekor log index 2945801585, integrated time
+2026-09-24T23:21:50Z. Full identities and log key ID preserved in identity-summary.json.
+
+Exactly one network-isolated positive verification PASS (exit 0), one altered temporary
+artifact rejection PASS (exit 1), one wrong-repository policy rejection PASS (exit 1).
+Exact policy, reproduction instructions, raw outputs and original published ZIP retained.
+Original bundle bytes unchanged; trusted roots acquired through pinned CLI default TUF.
+Verification requires neither credentials nor future anonymous attestation API availability.
+Manifest `SHA256SUMS` SHA-256: `0cc7bd3520ef97c4ece2999827c79f5442a9f012549c8c895d1a55f129514bc7`.
+Prior receipt prefix and all previous STOP/failure evidence remain unchanged.
+Only this appended receipt and evidence directory are included in the evidence commit/push.
+
+H2A1 ZIP custody signature/identity verification PASS; overall external auditability
+PARTIAL pending broader final packet completeness/independent retrieval review, including
+the distinct automatic release attestation. No historical custody is established.
+E0 HOLD; H2A2 UNSTARTED; Gate 1 PARTIAL, unchanged.
+Next bounded action: separately authorize final evidence completeness and independent
+retrieval review. It is not performed in this circuit.

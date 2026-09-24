@@ -1,0 +1,62 @@
+{
+  "observed_at": "2026-09-24T23:39:47.239513+00:00",
+  "bundle_filename": "sha256:a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f.jsonl",
+  "bundle_sha256": "6e90aa97a0effa34e73a5c12acc3e96fefb032e5f1ea95eb4dbeaad00e13927b",
+  "trusted_root_sha256": "65ca537f6ed8a47fd0e560c421baa1f6c1efb8b25fc200d8c5c02c0e92eb2b9c",
+  "certificate": {
+    "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+    "subjectAlternativeName": "https://github.com/vortexpixelz/ns001/.github/workflows/ns001-h1-custody.yml@refs/heads/main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "githubWorkflowTrigger": "workflow_dispatch",
+    "githubWorkflowSHA": "d9dcfbef1bea173b316bc968fd71421c982422c3",
+    "githubWorkflowName": "NS-001 exact H1 custody (manual only)",
+    "githubWorkflowRepository": "vortexpixelz/ns001",
+    "githubWorkflowRef": "refs/heads/main",
+    "buildSignerURI": "https://github.com/vortexpixelz/ns001/.github/workflows/ns001-h1-custody.yml@refs/heads/main",
+    "buildSignerDigest": "d9dcfbef1bea173b316bc968fd71421c982422c3",
+    "runnerEnvironment": "github-hosted",
+    "sourceRepositoryURI": "https://github.com/vortexpixelz/ns001",
+    "sourceRepositoryDigest": "d9dcfbef1bea173b316bc968fd71421c982422c3",
+    "sourceRepositoryRef": "refs/heads/main",
+    "sourceRepositoryIdentifier": "1354037143",
+    "sourceRepositoryOwnerURI": "https://github.com/vortexpixelz",
+    "sourceRepositoryOwnerIdentifier": "202687650",
+    "buildConfigURI": "https://github.com/vortexpixelz/ns001/.github/workflows/ns001-h1-custody.yml@refs/heads/main",
+    "buildConfigDigest": "d9dcfbef1bea173b316bc968fd71421c982422c3",
+    "buildTrigger": "workflow_dispatch",
+    "runInvocationURI": "https://github.com/vortexpixelz/ns001/actions/runs/36072331955/attempts/1",
+    "sourceRepositoryVisibilityAtSigning": "public"
+  },
+  "verified_timestamps": [
+    {
+      "type": "Tlog",
+      "uri": "https://rekor.sigstore.dev",
+      "timestamp": "2026-09-24T19:21:50-04:00"
+    }
+  ],
+  "tlog_identifiers": [
+    {
+      "logIndex": "2945801585",
+      "logId": {
+        "keyId": "wNI9atQGlz+VWfO6LRygH4QUfY/8W4RFwiT5i5WRgB0="
+      },
+      "integratedTime": "1790292110"
+    }
+  ],
+  "subject": [
+    {
+      "name": "NS001_H1_AUDIT_BUNDLE_20260903.zip",
+      "digest": {
+        "sha256": "a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f"
+      }
+    },
+    {
+      "name": "NS001_H1_PUBLICATION_PROVENANCE.json",
+      "digest": {
+        "sha256": "ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12"
+      }
+    }
+  ],
+  "predicate_type": "https://github.com/vortexpixelz/ns001/predicates/h1-custody/v1",
+  "acquisition": "Pinned gh attestation download; original output file preserved without reserialization. GitHub service attestation numeric ID is not supplied in this bundle; log and run identifiers are retained."
+}
