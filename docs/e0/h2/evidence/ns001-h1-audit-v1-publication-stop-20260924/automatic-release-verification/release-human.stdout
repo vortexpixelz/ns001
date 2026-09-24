@@ -1,0 +1,8 @@
+Resolved tag ns001-h1-audit-v1 to sha1:d9dcfbef1bea173b316bc968fd71421c982422c3
+Loaded attestation from GitHub API
+✓ Release ns001-h1-audit-v1 verified!
+
+Assets
+NS001_H1_AUDIT_BUNDLE_20260903.zip	sha256:a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f
+NS001_H1_PUBLICATION_PROVENANCE.json	sha256:ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12
+

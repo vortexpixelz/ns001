@@ -1,0 +1,67 @@
+{
+  "review_start_head": "510fa27e8cc5db085d36d163be2f2796bc70f2fc",
+  "recorded_at": "2026-09-24T23:57:47.608867+00:00",
+  "statement": {
+    "_type": "https://in-toto.io/Statement/v1",
+    "subject": [
+      {
+        "uri": "pkg:github/vortexpixelz/ns001@ns001-h1-audit-v1",
+        "digest": {
+          "sha1": "d9dcfbef1bea173b316bc968fd71421c982422c3"
+        }
+      },
+      {
+        "name": "NS001_H1_AUDIT_BUNDLE_20260903.zip",
+        "digest": {
+          "sha256": "a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f"
+        }
+      },
+      {
+        "name": "NS001_H1_PUBLICATION_PROVENANCE.json",
+        "digest": {
+          "sha256": "ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12"
+        }
+      }
+    ],
+    "predicateType": "https://in-toto.io/attestation/release/v0.2",
+    "predicate": {
+      "databaseId": "396003416",
+      "ownerId": "202687650",
+      "packageId": "1354037143",
+      "purl": "pkg:github/vortexpixelz/ns001@ns001-h1-audit-v1",
+      "repository": "vortexpixelz/ns001",
+      "repositoryId": "1354037143",
+      "tag": "ns001-h1-audit-v1"
+    }
+  },
+  "signature_metadata": {
+    "certificate": {
+      "certificateIssuer": "CN=Fulcio Intermediate l1,O=GitHub\\, Inc.",
+      "subjectAlternativeName": "https://dotcom.releases.github.com"
+    }
+  },
+  "verified_timestamps": [
+    {
+      "type": "TimestampAuthority",
+      "uri": "timestamp.githubapp.com",
+      "timestamp": "2026-09-24T19:52:11Z"
+    }
+  ],
+  "verified_identity_policy": {
+    "subjectAlternativeName": {
+      "subjectAlternativeName": "",
+      "regexp": "^https://dotcom\\.releases\\.github\\.com$"
+    },
+    "issuer": {
+      "issuer": "",
+      "regexp": ".*"
+    }
+  },
+  "original_json_stdout_sha256": "12874c0bce179bf5686b2461ac74b1b5ee542ad904b9e1ae3461735741c4cd75",
+  "original_compressed_bundle_sha256": "a03112519fadb5c016f77e8169bc1ecf36caffe409f896dbead7cb5af624550e",
+  "decompressed_bundle_sha256": "d7b5d658b2e204e6360d87512da9a1d21c68360642c976590c6e2eda49092f93",
+  "material_gap": "CLOSED",
+  "credential_free_cli_reproduction": "NOT DEMONSTRATED: clean CLI exits 4 at login guard",
+  "anonymous_api_retrieval": "HTTP 200; bundle equals authenticated retrieval and verified outputs",
+  "overall_h2a1": "PARTIAL pending consolidated independent review of added platform evidence; custom custody status unchanged"
+}

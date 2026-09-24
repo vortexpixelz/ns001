@@ -1,0 +1,12 @@
+{
+  "raw_blob_http_status": 200,
+  "raw_blob_authentication": "Anonymous GET of service-returned public download URL",
+  "blob_host": "tmaproduction.blob.core.windows.net",
+  "original_blob_sha256": "a03112519fadb5c016f77e8169bc1ecf36caffe409f896dbead7cb5af624550e",
+  "decompressed_bundle_sha256": "d7b5d658b2e204e6360d87512da9a1d21c68360642c976590c6e2eda49092f93",
+  "conversion": "Snappy decompression only; no JSON reserialization; exact original compressed bytes retained",
+  "authenticated_api_response_sha256": "a5c86557dd151df1bcda9fb21887d9699fb0f27024c622eae68736dac467036f",
+  "anonymous_api_response_sha256": "373890280ce4191403cf73d7b37158e516d50e488a20c8b66ce6065a961bcf8b",
+  "api_response_preservation": "Temporary only: envelopes contain expiring storage URL query; full bundle and exact verification stdout retained in repository instead",
+  "bundle_equivalence": "Decompressed blob JSON equals bundle in authenticated API, anonymous API and release-json.stdout"
+}

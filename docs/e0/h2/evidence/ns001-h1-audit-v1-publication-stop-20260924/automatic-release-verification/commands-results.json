@@ -1,0 +1,200 @@
+[
+  {
+    "name": "gh-version",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "--version"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:30.308914+00:00"
+  },
+  {
+    "name": "verify-help",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify",
+      "--help"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:30.406820+00:00"
+  },
+  {
+    "name": "verify-asset-help",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "--help"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:30.496817+00:00"
+  },
+  {
+    "name": "release-human",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify",
+      "ns001-h1-audit-v1",
+      "-R",
+      "vortexpixelz/ns001"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:33.291191+00:00"
+  },
+  {
+    "name": "release-json",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify",
+      "ns001-h1-audit-v1",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:36.255716+00:00"
+  },
+  {
+    "name": "zip-human",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/NS001_H1_AUDIT_BUNDLE_20260903.zip",
+      "-R",
+      "vortexpixelz/ns001"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:39.232557+00:00"
+  },
+  {
+    "name": "zip-json",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/NS001_H1_AUDIT_BUNDLE_20260903.zip",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:41.635179+00:00"
+  },
+  {
+    "name": "provenance-human",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/NS001_H1_PUBLICATION_PROVENANCE.json",
+      "-R",
+      "vortexpixelz/ns001"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:45.093049+00:00"
+  },
+  {
+    "name": "provenance-json",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/NS001_H1_PUBLICATION_PROVENANCE.json",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 0,
+    "utc": "2026-09-24T23:52:47.740340+00:00"
+  },
+  {
+    "name": "altered-zip",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/altered.zip",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 1,
+    "utc": "2026-09-24T23:52:48.636920+00:00"
+  },
+  {
+    "name": "unrelated-file",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/unrelated.txt",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 1,
+    "utc": "2026-09-24T23:52:49.450229+00:00"
+  },
+  {
+    "name": "clean-release-json",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify",
+      "ns001-h1-audit-v1",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 4,
+    "utc": "2026-09-24T23:52:49.521539+00:00"
+  },
+  {
+    "name": "clean-zip-json",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/clean/NS001_H1_AUDIT_BUNDLE_20260903.zip",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 4,
+    "utc": "2026-09-24T23:52:49.856083+00:00"
+  },
+  {
+    "name": "clean-provenance-json",
+    "command": [
+      "/home/jacob/.local/opt/ns001-gh/2.101.0/gh",
+      "release",
+      "verify-asset",
+      "ns001-h1-audit-v1",
+      "/tmp/ns001-release-circuit-nj3_xece/clean/NS001_H1_PUBLICATION_PROVENANCE.json",
+      "-R",
+      "vortexpixelz/ns001",
+      "--format",
+      "json"
+    ],
+    "exit_code": 4,
+    "utc": "2026-09-24T23:52:50.128202+00:00"
+  }
+]

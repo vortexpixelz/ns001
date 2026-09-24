@@ -1,0 +1,38 @@
+[
+  {
+    "phase": "initial",
+    "url": "https://github.com/vortexpixelz/ns001/releases/download/ns001-h1-audit-v1/NS001_H1_AUDIT_BUNDLE_20260903.zip",
+    "status": 200,
+    "bytes": 51103,
+    "sha256": "a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f",
+    "authentication": "none",
+    "utc": "2026-09-24T23:52:36.728830+00:00"
+  },
+  {
+    "phase": "initial",
+    "url": "https://github.com/vortexpixelz/ns001/releases/download/ns001-h1-audit-v1/NS001_H1_PUBLICATION_PROVENANCE.json",
+    "status": 200,
+    "bytes": 2298,
+    "sha256": "ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12",
+    "authentication": "none",
+    "utc": "2026-09-24T23:52:41.905602+00:00"
+  },
+  {
+    "phase": "independent-clean",
+    "url": "https://github.com/vortexpixelz/ns001/releases/download/ns001-h1-audit-v1/NS001_H1_AUDIT_BUNDLE_20260903.zip",
+    "status": 200,
+    "bytes": 51103,
+    "sha256": "a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f",
+    "authentication": "none",
+    "utc": "2026-09-24T23:52:49.755835+00:00"
+  },
+  {
+    "phase": "independent-clean",
+    "url": "https://github.com/vortexpixelz/ns001/releases/download/ns001-h1-audit-v1/NS001_H1_PUBLICATION_PROVENANCE.json",
+    "status": 200,
+    "bytes": 2298,
+    "sha256": "ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12",
+    "authentication": "none",
+    "utc": "2026-09-24T23:52:50.023762+00:00"
+  }
+]

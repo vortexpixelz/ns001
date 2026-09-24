@@ -512,3 +512,49 @@ the distinct automatic release attestation. No historical custody is established
 E0 HOLD; H2A2 UNSTARTED; Gate 1 PARTIAL, unchanged.
 Next bounded action: separately authorize final evidence completeness and independent
 retrieval review. It is not performed in this circuit.
+
+
+## Authorized automatic immutable-release attestation circuit — material gap CLOSED
+
+Starting preparation HEAD `510fa27e8cc5db085d36d163be2f2796bc70f2fc`; clean tree.
+Only existing platform attestation retrieval/verification/preservation was authorized.
+Pinned gh 2.101.0 executable hash matched the validated binary. Release verify and
+both ZIP/provenance verify-asset checks PASS in human and JSON forms (all exit 0).
+Original JSON stdout bytes were captured before parsing, and original raw Snappy bundle
+bytes plus losslessly decompressed bundle JSON were preserved. No signing or rerun.
+
+Evidence: `docs/e0/h2/evidence/ns001-h1-audit-v1-publication-stop-20260924/automatic-release-verification`.
+Exact release JSON: `release-json.stdout`; SHA-256 `12874c0bce179bf5686b2461ac74b1b5ee542ad904b9e1ae3461735741c4cd75`.
+ZIP JSON: `zip-json.stdout`; SHA-256 `12874c0bce179bf5686b2461ac74b1b5ee542ad904b9e1ae3461735741c4cd75`.
+Provenance JSON: `provenance-json.stdout`; SHA-256 `12874c0bce179bf5686b2461ac74b1b5ee542ad904b9e1ae3461735741c4cd75`.
+Original bundle blob: `release-attestation.bundle.snappy`; SHA-256 `a03112519fadb5c016f77e8169bc1ecf36caffe409f896dbead7cb5af624550e`.
+Decompressed original JSON: `release-attestation.bundle.json`; SHA-256 `d7b5d658b2e204e6360d87512da9a1d21c68360642c976590c6e2eda49092f93`.
+Manifest `SHA256SUMS`: SHA-256 `b2e5d84c90edd6381e78b5106a9284d832ac62c8805dcc86c355c08508e375b4`.
+
+Represented tag `ns001-h1-audit-v1`, release ID 396003416, repository ID 1354037143,
+owner ID 202687650, commit `d9dcfbef1bea173b316bc968fd71421c982422c3`.
+ZIP SHA-256 `a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f`;
+provenance SHA-256 `ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12`.
+Both matched fresh anonymous downloads twice and previous preserved identities.
+Platform SAN `https://dotcom.releases.github.com`; certificate issuer
+`CN=Fulcio Intermediate l1,O=GitHub\, Inc.`; verified RFC3161 timestamp
+`2026-09-24T19:52:11Z` from `timestamp.githubapp.com`. No OIDC issuer/workflow
+identity is invented for this platform record.
+
+Altered temporary ZIP and unrelated file both rejected (exit 1, absent digest subject).
+Original assets untouched. Three clean-environment CLI attempts exited 4 at the login
+guard; credential-free CLI verification is NOT demonstrated. The exact source-derived
+attestation API and service-returned blob URL were also read anonymously: both HTTP 200,
+bundle contents equal authenticated verification output. Thus distinguish successful
+public downloads/API reads from CLI verification performed with configured authentication.
+No claim of offline verification of the platform bundle is made in this circuit.
+
+The precise prior gap, "Separate automatic immutable-release attestation and durable
+verification material/results absent", is CLOSED by this preservation. H2A1 overall
+external auditability remains PARTIAL pending independent review of this added platform
+evidence/credential-free verification route. Prior final review is retained unchanged.
+Custom custody evidence and all previous STOP/failure history remain byte-identical.
+No release/tag/asset/workflow/settings changes, dispatch, new attestation, E0 or H2A2.
+E0 HOLD; H2A2 UNSTARTED; Gate 1 PARTIAL. Historical/authority limitations unchanged.
+One next bounded action: separately authorize read-only independent review of the added
+platform evidence and its credential-free verification route. Not performed here.

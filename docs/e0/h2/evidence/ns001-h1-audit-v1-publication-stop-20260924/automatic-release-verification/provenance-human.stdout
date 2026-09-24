@@ -1,0 +1,5 @@
+Calculated digest for NS001_H1_PUBLICATION_PROVENANCE.json: sha256:ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12
+Resolved tag ns001-h1-audit-v1 to sha1:d9dcfbef1bea173b316bc968fd71421c982422c3
+Loaded attestation from GitHub API
+
+✓ Verification succeeded! NS001_H1_PUBLICATION_PROVENANCE.json is present in release ns001-h1-audit-v1
