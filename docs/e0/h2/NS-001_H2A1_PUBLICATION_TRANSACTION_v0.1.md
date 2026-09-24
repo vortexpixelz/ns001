@@ -265,3 +265,72 @@ STOP prefix remains byte-identical. All pre-existing tracked artifacts remain un
 - One next bounded action: request explicit authorization to correct the upload
   invocation and resume against the existing draft/tag after fresh state checks;
   do not recreate objects or dispatch as an automatic recovery.
+
+
+## Corrected asset-upload circuit — verified draft only
+
+### FROZEN BEFORE THIS CIRCUIT
+
+Preparation HEAD `3ea97cab94cd2a0e99ee98ca5e49425f2d657135`.
+The user explicitly authorized ONE corrected upload circuit against existing draft
+`396003416`, with exactly the existing frozen ZIP and provenance JSON. Publication,
+workflow dispatch, attestation creation, new tags/releases and clobbering are excluded.
+All preceding STOP events and the failed invocation remain preserved verbatim.
+
+Fresh origin fetch and read-only preflight PASS. Tag `ns001-h1-audit-v1` resolves to
+`d9dcfbef1bea173b316bc968fd71421c982422c3`; main unchanged. Direct release read and
+pinned CLI tag resolution identify the same draft ID, correct target/body, unpublished
+state and zero assets. Frozen ZIP is 51103 bytes / SHA-256
+`a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f`.
+Frozen provenance is extracted byte-for-byte from the re-freeze JSON block, 2298 bytes /
+SHA-256 `ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12`.
+Neither asset was regenerated or altered. No observed fields were inserted into provenance.
+Pinned gh 2.101.0 binary hash matches; current account vortexpixelz / 202687650.
+Same four prior run IDs; both digest-specific attestation lookups returned HTTP 404
+(bounded negative observation, not universal absence proof).
+
+### OBSERVED DURING CORRECTED UPLOAD
+
+Actual release upload_url:
+`https://uploads.github.com/repos/vortexpixelz/ns001/releases/396003416/assets{?name,label}`.
+Host verified exactly `uploads.github.com`. The [official existing-release CLI command](https://cli.github.com/manual/gh_release_upload)
+was used once per file, using `/home/jacob/.local/opt/ns001-gh/2.101.0/gh`:
+`release upload ns001-h1-audit-v1 FILE --repo vortexpixelz/ns001`, without `--clobber`.
+Each succeeded and was followed by direct readback of release ID 396003416 before proceeding.
+
+| Asset ID | Name | Size | State | Service digest | Uploader / ID | created_at | updated_at | Observed browser locator |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 586661162 | NS001_H1_AUDIT_BUNDLE_20260903.zip | 51103 | uploaded | sha256:a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f | vortexpixelz / 202687650 | 2026-09-24T19:26:50Z | 2026-09-24T19:26:50Z | https://github.com/vortexpixelz/ns001/releases/download/untagged-f16adb2dc90288a63b0c/NS001_H1_AUDIT_BUNDLE_20260903.zip |
+| 586661207 | NS001_H1_PUBLICATION_PROVENANCE.json | 2298 | uploaded | sha256:ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12 | vortexpixelz / 202687650 | 2026-09-24T19:26:51Z | 2026-09-24T19:26:52Z | https://github.com/vortexpixelz/ns001/releases/download/untagged-f16adb2dc90288a63b0c/NS001_H1_PUBLICATION_PROVENANCE.json |
+
+The draft locators above are GitHub's actual returned values. Their `untagged-...`
+component is not rewritten into a presumed future published URL. Tag/target association
+is verified independently. No third asset, deletion, replacement or retry occurred.
+
+### VERIFIED AFTER UPLOAD — STILL NOT PUBLISHED
+
+Both assets were independently fetched using authenticated asset-ID GETs with
+`Accept: application/octet-stream`, stored in fresh temporary download paths, and hashed.
+ZIP downloaded SHA-256: `a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f`.
+Provenance downloaded SHA-256: `ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12`.
+Both match the frozen inputs, service digests and exact sizes. Draft retrieval required
+authenticated access; no anonymous public-asset availability is claimed.
+
+Final readback: exactly two assets; draft=true; published_at=null; immutable=false.
+No finalization request was issued. Same four existing workflow runs; no custody
+workflow dispatch or attestation creation. Main and scientific artifacts unchanged.
+The existing evidence deposit is extended only in its `corrected-upload/` subdirectory,
+with original failure files unchanged. New exact readbacks, invocation/result records,
+service identities/timestamps and independent hash results are committed with this receipt.
+The commit containing this continuation pins its bytes; remote retrieval is checked after push.
+
+- Fresh preflight: PASS.
+- Corrected uploads: both succeeded; independent download verdict: PASS.
+- Draft published: NO.
+- Workflow dispatched: NO.
+- Attestation created: NO.
+- Existing tag/release preserved; no new tag/release created.
+- H2A1: local byte identity VERIFIED; external auditability PARTIAL, pending publication/custody evidence.
+- E0 HOLD; H2A2 UNSTARTED; Gate 1 unchanged/PARTIAL.
+- One next bounded action: obtain separate authorization to finalize this exact verified
+  draft after fresh checks. Do not finalize or dispatch within this circuit.

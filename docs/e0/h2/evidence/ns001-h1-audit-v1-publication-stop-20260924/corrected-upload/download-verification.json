@@ -1,0 +1,18 @@
+[
+  {
+    "asset_id": 586661162,
+    "name": "NS001_H1_AUDIT_BUNDLE_20260903.zip",
+    "bytes": 51103,
+    "sha256": "a055e9817808fddc3de1c1be138e4ab6f7539b01a470a2455bee64a354db614f",
+    "download_method": "authenticated GET by asset ID; Accept application/octet-stream",
+    "observed_at": "2026-09-24T19:26:53.025130+00:00"
+  },
+  {
+    "asset_id": 586661207,
+    "name": "NS001_H1_PUBLICATION_PROVENANCE.json",
+    "bytes": 2298,
+    "sha256": "ff649229275d88be762e2b762b35b27c3aac8e252a070ac39b18bffc06142d12",
+    "download_method": "authenticated GET by asset ID; Accept application/octet-stream",
+    "observed_at": "2026-09-24T19:26:53.551604+00:00"
+  }
+]
