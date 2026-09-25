@@ -40,10 +40,14 @@ def H(value):
     return hashlib.sha256(value).hexdigest()
 
 
+def oracle_role(name, k):
+    return dict(role=name, source_sha256=k, object_type='sealed-memfd',
+                byte_length=3, sha256=F, seals=L, reference_bound=True)
+
+
 def oracle(k, t):
     def role(name):
-        return dict(role=name, source_sha256=k, object_type='sealed-memfd',
-                    byte_length=3, sha256=F, seals=L, reference_bound=True)
+        return oracle_role(name, k)
     return C(dict(profile=PROFILE, verdict='ACCEPT', snapshot_sha256=S,
                   manifest_sha256=M, source_sha256=F, byte_length=3,
                   implementation_sha256=k, harness_sha256=t, consumer=role('consumer'),
@@ -86,6 +90,8 @@ class Trace:
         self.role_events = {'consumer': [], 'observer': []}
         self.associations = []
         self.seals = []
+        self.seal_additions = []
+        self.copy_checks = []
         self.open_after_validation = []
         self.finalized = False
         self.source_validated = False
@@ -94,6 +100,15 @@ class Trace:
 
     def install(self, stack):
         m = self.m
+        previous_profile = sys.getprofile()
+        def invocation(frame, event, arg):
+            if event == 'call':
+                if frame.f_code is m._FIXED_CONSUMER.__code__:
+                    self.calls['consumer'] += 1
+                elif frame.f_code is m._FIXED_OBSERVER.__code__:
+                    self.calls['observer'] += 1
+        sys.setprofile(invocation)
+        stack.callback(sys.setprofile, previous_profile)
         originals = {n: getattr(m, n) for n in ('memfd_create', 'fcntl', 'pread',
                      'fstat', 'fd_open', 'close', '_boundary', '_finalize', '_acquire')}
         def create(name, flags):
@@ -115,15 +130,18 @@ class Trace:
                 self.duplicates.append((fd, result))
             if op == m.F_GET_SEALS:
                 self.seals.append(result)
+            if op == m.F_ADD_SEALS:
+                self.seal_additions.append((args[0], result))
             if caller in ('consume', 'observe'):
                 self.role_events['consumer' if caller == 'consume' else 'observer'].append(('seal', fd, result))
             return result
         def pr(fd, count, offset):
             caller = inspect.currentframe().f_back.f_code.co_name
             result = originals['pread'](fd, count, offset)
+            if caller == '_copy_check':
+                self.copy_checks.append((os.fstat(fd).st_size, len(result), H(result)))
             if caller in ('consume', 'observe'):
                 role = 'consumer' if caller == 'consume' else 'observer'
-                self.calls[role] += 1
                 self.role_events[role].append(('read', fd, count, offset, result))
             return result
         def fs(fd):
@@ -147,7 +165,7 @@ class Trace:
             return originals['_boundary'](handles, key)
         def acquired(root, supplied):
             payload = originals['_acquire'](root, supplied)
-            self.source_validated = True
+            self.source_validated = payload == PAYLOAD
             return payload
         def finalized(fd):
             key = originals['_finalize'](fd)
@@ -157,6 +175,32 @@ class Trace:
                          ('fstat', fs), ('fd_open', op), ('close', cl),
                          ('_boundary', boundary), ('_finalize', finalized), ('_acquire', acquired)]:
             stack.enter_context(patch.object(m, name, fn))
+
+    def evidence(self):
+        """Compute observations before ACCEPT serialization; missing evidence fails closed."""
+        m = self.m
+        duplication = (len(self.duplicates) == 2
+                       and all(a == self.anchor for a, _ in self.duplicates)
+                       and len({self.anchor, *(b for _, b in self.duplicates)}) == 3)
+        role_observed = duplication
+        if duplication:
+            for role, (_, fd) in zip(('consumer', 'observer'), self.duplicates):
+                role_observed = role_observed and self.role_events[role] == [
+                    ('stat', fd, *self.key, 3), ('seal', fd, m.Q), ('read', fd, 4, 0, PAYLOAD)]
+        # None deliberately represents an absent independent association component.
+        association = (len(self.associations) == 7 and all(self.associations)
+                       and role_observed) if self.associations else None
+        copies = self.copy_checks == [(3, 3, F), (3, 3, F)]
+        return m.HandoffEvidence(
+            source_validated=self.source_validated,
+            copy_validated=copies,
+            sealed_revalidated=(copies and self.seal_additions == [(m.Q, 0)] and self.finalized),
+            creation_witnessed=(self.anchor is not None and
+                self.creation_flags == os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC),
+            duplication_witnessed=duplication,
+            same_object=association,
+            no_reopen=not self.open_after_validation,
+            consumer_calls=self.calls['consumer'], observer_calls=self.calls['observer'])
 
     def positive(self):
         m = self.m
@@ -216,7 +260,24 @@ def main():
                     trace.install(stack)
                     if fault:
                         fault(root_path, options, trace, stack)
-                    record = m.run(**options)
+                    pending = m.run(**options)
+                    if isinstance(pending, m.PendingHandoff):
+                        # No canonical ACCEPT exists before independent evidence passes.
+                        assert not hasattr(pending, 'verdict')
+                        evidence = trace.evidence()
+                        if case_id == 'N31':
+                            assert pending.consumer == oracle_role('consumer', k)
+                            assert pending.observer == oracle_role('observer', k)
+                            assert evidence.same_object is None
+                            assert all(v is True for key, v in vars(evidence).items()
+                                       if key not in ('same_object', 'consumer_calls', 'observer_calls'))
+                            assert evidence.consumer_calls == evidence.observer_calls == 1
+                            trace.proof.append(dict(omitted='independent association observations',
+                                                    role_results_preserved=True,
+                                                    no_accept_before_finalization=True))
+                        record = m.finalize(pending, evidence)
+                    else:
+                        record = pending
                 actual = json.loads(record)
                 if code is None:
                     assert record == oracle(k, t), (case_id, actual)
@@ -380,9 +441,14 @@ def main():
         case('N30-' + str(missing), 'CONSUMER_RESULT', fault=wrong_result('consumer', missing),
              counts=(1, 0), kind='synthetic result fault')
     def no_evidence(p, o, tr, st):
-        original = m._receipt
-        st.enter_context(patch.object(m, '_receipt', lambda pin, c, ob: original(pin, c, None)))
-    case('N31', 'EVIDENCE_INCOMPLETE', fault=no_evidence, counts=(1, 1), kind='synthetic observation omission')
+        original = tr.evidence
+        def withheld():
+            # Only the independent same-object association evidence is withheld.
+            # Both real role results, creation/duplication and call observations remain.
+            tr.associations.clear()
+            return original()
+        st.enter_context(patch.object(tr, 'evidence', withheld))
+    case('N31', 'EVIDENCE_INCOMPLETE', fault=no_evidence, counts=(1, 1), kind='withheld independent association evidence; both role results intact')
 
     def no_sealing(p, o, tr, st):
         original = m.memfd_create
@@ -498,6 +564,57 @@ def main():
             return original(fd)
         st.enter_context(patch.object(m, '_members', changed))
     case('A-acquisition-change', 'ROOT_UNSTABLE', fault=unstable, kind='scheduled real fixture change')
+    # B1: full-file identity, incomplete acquisition and explicit EOF checks.
+    case('B1-large-tail', 'FILE_LENGTH', setup=write_source(PAYLOAD + b'x' * 4096))
+    def short_acquisition(member):
+        def fault(p, o, tr, st):
+            original = m.read
+            def limited(fd, count):
+                if os.fstat(fd).st_ino == os.stat(p / member).st_ino and count > 1:
+                    return original(fd, 3 if member == 'source.bin' else len(MANIFEST))
+                return original(fd, count)
+            st.enter_context(patch.object(m, 'read', limited))
+        return fault
+    case('B1-source-prefix', 'FILE_LENGTH', setup=write_source(b'abcd'),
+         fault=short_acquisition('source.bin'), kind='oversized file with short-read adapter; rejected by size before read')
+    case('B1-manifest-oversize-prefix', 'MANIFEST_SIZE',
+         setup=raw_manifest(MANIFEST + b' ' * 2048), fault=short_acquisition('manifest.json'),
+         kind='oversized manifest with short-read adapter; rejected by size before read')
+    case('B1-manifest-trailing-prefix', 'IO_ERROR',
+         setup=raw_manifest(MANIFEST + b' '), fault=short_acquisition('manifest.json'),
+         kind='actual short read of incomplete manifest prefix')
+    def incomplete_source(p, o, tr, st):
+        original = m.read
+        def short(fd, count):
+            if os.fstat(fd).st_ino == os.stat(p / 'source.bin').st_ino and count > 1:
+                return original(fd, 2)
+            return original(fd, count)
+        st.enter_context(patch.object(m, 'read', short))
+    case('B1-incomplete-source', 'IO_ERROR', fault=incomplete_source,
+         kind='actual short acquisition read of exact-size file')
+    def trailing_at_eof(p, o, tr, st):
+        original = m.read
+        def appended(fd, count):
+            if count == 1 and os.fstat(fd).st_ino == os.stat(p / 'source.bin').st_ino:
+                with (p / 'source.bin').open('ab') as f: f.write(b'x')
+            return original(fd, count)
+        st.enter_context(patch.object(m, 'read', appended))
+    case('B1-eof-extra-byte', 'FILE_LENGTH', fault=trailing_at_eof,
+         kind='scheduled real append immediately before EOF probe')
+    # B2: incomplete positioned reads are IO, unlike an actually short object.
+    for phase in ('before-seal', 'after-seal'):
+        def short_memfd(p, o, tr, st, phase=phase):
+            original = m.pread
+            def short(fd, count, offset):
+                if inspect.currentframe().f_back.f_code.co_name == '_copy_check':
+                    sealed = fcntl.fcntl(fd, fcntl.F_GET_SEALS) == m.Q
+                    if sealed == (phase == 'after-seal'):
+                        assert os.fstat(fd).st_size == 3
+                        return original(fd, 2, offset)
+                return original(fd, count, offset)
+            st.enter_context(patch.object(m, 'pread', short))
+        case('B2-short-read-' + phase, 'MEMFD_COPY_IO', fault=short_memfd,
+             kind='short-read adapter on actual correctly-sized memfd; no mutation')
     assert all(v == positives[0] for v in positives)
     assert {f'N{i:02}' for i in range(1, 32)} <= {v['case'].split('-')[0] for v in inventory}
     assert {f'M{i:02}' for i in range(1, 16)} <= {v['case'].split('-')[0] for v in inventory}

@@ -4,7 +4,7 @@ The caller is the reviewed, exclusively owning synthetic harness. Source pins an
 observations are externally checked by that harness, not authenticated by this module.
 No callbacks, selectable consumers, plugins, path-based consumption or mutable backend.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from hashlib import sha256
 import json
 import re
@@ -133,7 +133,20 @@ def _read_member(fd, name, count, before):
         require(stat.S_ISREG(s.st_mode) and s.st_nlink == 1, 'ROOT_UNSTABLE')
         require((s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
                 == before[name], 'ROOT_UNSTABLE')
-        return read(item, count)
+        if name == 'source.bin':
+            require(s.st_size == 3, 'FILE_LENGTH')
+        else:
+            require(s.st_size <= 1024, 'MANIFEST_SIZE')
+        data = read(item, count)
+        # A partial read is not proof that the complete file matched. Never
+        # complete/retry it; compare against the opened object's observed size.
+        require(len(data) == s.st_size, 'IO_ERROR')
+        require(read(item, 1) == b'',
+                'FILE_LENGTH' if name == 'source.bin' else 'MANIFEST_NONCANONICAL')
+        after = fstat(item)
+        require((after.st_dev, after.st_ino, after.st_size,
+                 after.st_mtime_ns, after.st_ctime_ns) == before[name], 'ROOT_UNSTABLE')
+        return data
     finally:
         close(item)
 
@@ -212,6 +225,7 @@ def _copy_check(fd):
         data = pread(fd, 4, 0)
     except OSError:
         raise Refusal('MEMFD_COPY_IO') from None
+    require(len(data) >= min(size, 4), 'MEMFD_COPY_IO')
     require(size == len(data) == 3, 'MEMFD_COPY_SIZE')
     require(sha256(data).hexdigest() == F, 'MEMFD_COPY_DIGEST')
 
@@ -286,21 +300,61 @@ def _result(value, key, role, pin):
                 byte_length=3, sha256=F, seals=L.copy(), reference_bound=True)
 
 
-def _receipt(pins, consumer, observer):
-    require(consumer is not None and observer is not None, 'EVIDENCE_INCOMPLETE')
-    # Content tuple required by the abstract contract, with M/S retained by validator.
-    content = dict(byte_length=consumer['byte_length'], sha256=consumer['sha256'],
-                   manifest_sha256=M, snapshot_sha256=S)
-    require(content == dict(byte_length=3, sha256=F, manifest_sha256=M, snapshot_sha256=S),
-            'EVIDENCE_INCOMPLETE')
-    return canonical(dict(profile=PROFILE, verdict='ACCEPT', snapshot_sha256=S,
-                          manifest_sha256=M, source_sha256=F, byte_length=3,
-                          implementation_sha256=pins.implementation, harness_sha256=pins.harness,
-                          consumer=consumer, observer=observer,
-                          checks=dict(source_validated=True, copy_validated=True,
-                                      sealed_revalidated=True, creation_witnessed=True,
-                                      duplication_witnessed=True, same_object=True,
-                                      no_reopen=True, consumer_calls=1, observer_calls=1)))
+@dataclass(frozen=True)
+class PendingHandoff:
+    """Measurements only: not an outcome and never a serializable ACCEPT receipt."""
+    pins: Pins
+    consumer: dict
+    observer: dict
+
+
+@dataclass(frozen=True)
+class HandoffEvidence:
+    """Supplied by the separately reviewed harness after independent observation.
+
+    These observations are trusted-harness evidence, not authenticated claims from
+    an arbitrary caller. No callback or selectable role is introduced.
+    """
+    source_validated: bool
+    copy_validated: bool
+    sealed_revalidated: bool
+    creation_witnessed: bool
+    duplication_witnessed: bool
+    same_object: bool
+    no_reopen: bool
+    consumer_calls: int
+    observer_calls: int
+
+
+def finalize(pending, evidence):
+    """Only this boundary may serialize ACCEPT, after external evidence checks."""
+    try:
+        require(type(pending) is PendingHandoff and type(evidence) is HandoffEvidence,
+                'EVIDENCE_INCOMPLETE')
+        checks = asdict(evidence)
+        for name, value in checks.items():
+            if name.endswith('_calls'):
+                require(type(value) is int and value == 1, 'EVIDENCE_INCOMPLETE')
+            else:
+                require(value is True, 'EVIDENCE_INCOMPLETE')
+        pins = pending.pins
+        roles = {}
+        for role, value in (('consumer', pending.consumer), ('observer', pending.observer)):
+            expected = dict(role=role, source_sha256=pins.implementation,
+                            object_type='sealed-memfd', byte_length=3, sha256=F,
+                            seals=L.copy(), reference_bound=True)
+            require(type(value) is dict and value == expected
+                    and all(type(value[k]) is type(v) for k, v in expected.items()),
+                    'EVIDENCE_INCOMPLETE')
+            # Emit reference binding only after the independent observation passed.
+            roles[role] = dict(value, reference_bound=evidence.same_object)
+        return canonical(dict(profile=PROFILE, verdict='ACCEPT', snapshot_sha256=S,
+                              manifest_sha256=M, source_sha256=F, byte_length=3,
+                              implementation_sha256=pins.implementation,
+                              harness_sha256=pins.harness, consumer=roles['consumer'],
+                              observer=roles['observer'], checks=checks))
+    except Refusal as exc:
+        return refusal(str(exc))
 
 
 def _handoff(a, key, pins):
@@ -328,7 +382,7 @@ def _handoff(a, key, pins):
         _boundary(handles, key)
         observer = _result(ob, key, 'observer', pins.implementation)
         _boundary(handles, key)
-        return _receipt(pins, consumer, observer)
+        return PendingHandoff(pins, consumer, observer)
     except OSError:
         raise Refusal('MEMFD_HANDLE') from None
     finally:
@@ -359,7 +413,9 @@ def _protected(payload, pins):
 
 
 def run(root, supplied, pins, expected=(F, 3, M, S)):
-    """One attempt; no fallback or repair. Harness independently validates evidence.
+    """One attempt returning REFUSE bytes or unaccepted PendingHandoff measurements.
+
+    The independent harness must supply evidence to finalize; run never emits ACCEPT.
 
     root is a live prebound capability from bind_root, never a manifest parameter.
     Pins contain hashes checked before import by the external trusted test harness.
