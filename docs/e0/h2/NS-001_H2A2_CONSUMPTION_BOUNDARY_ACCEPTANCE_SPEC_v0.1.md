@@ -1,33 +1,26 @@
 # NS-001 H2A2 consumption-boundary acceptance specification v0.1
 
-## Basis, decision and authority
+## Basis, correction and authority
 
 Preparation branch: `codex/e0-h2-preparation`.
-Reviewed HEAD: `9414f490fba4465859a0298b45c5e3d2ee18be70`; initially clean.
-This is a document-only prospective acceptance contract, not an implementation, test
-result, runtime selection or execution authorization. Only this specification changes.
-No interpreter, compiler, loader, client, scientific code or acceptance test was invoked.
-Inspection used text readers, Git and file hashing only. No network research was performed.
+Correction base: `9544fbebc013979e53f978c54c07e3f1e682bd35`; initially clean.
+This document-only correction addresses B1–B4 from
+`docs/e0/h2/NS-001_H2A2_CONSUMPTION_BOUNDARY_ACCEPTANCE_REVIEW_v0.1.md`.
+The earlier specification and independent review remain available at that commit; the
+review is not edited. Only this specification and the new correction receipt change.
+No compiler, interpreter, loader, client, application subprocess or live runtime is invoked.
 
-**Implementation readiness: PARTIAL.** The bytes-only surrogate below has a defined
-contract. Actual compiler-boundary acceptance remains blocked on selection/review of a
-specific engine and an observation mechanism at that engine's real input boundary.
-An ordinary wrapper reporting its outgoing argument is not sufficient. A live E0 entrypoint
-has not been selected. Neither omission is filled by guessing or by promoting surrogate
-success. The next action is independent document review, not implementation.
+**Surrogate implementation readiness: YES at the contract level, subject to independent
+review and separate implementation authorization.** Concrete future implementation hashes
+are acceptance inputs to freeze before testing, not permission to change the contract.
+The real-engine profile remains unqualified and unavailable. No E0 entrypoint is selected.
 
-Repository authorities, all pinned at reviewed HEAD:
-
-- `docs/e0/h2/NS-001_H2A2_EXTERNAL_TRUST_ROOT_NEXT_SCOPE_v0.1.md`.
-- `docs/e0/h2/NS-001_H2A2_RUNTIME_TRUST_ROOT_CORRECTION_REVIEW_v0.1.md`.
-- `docs/e0/h2/NS-001_H2A2_SNAPSHOT_HANDOFF_ACCEPTANCE_SPEC_v0.1.md`.
-- `docs/e0/h2/NS-001_H2A2_HANDOFF_MECHANISM_SELECTION_v0.1.md`.
-- `docs/e0/h2/NS-001_H2A2_RUNTIME_TRUST_ROOT_DESIGN_v0.1.md`.
-- `docs/e0/h2/H2_EVIDENCE_CONTRACT_DRAFT.md`.
-
-The existing first-slice contract and its historical evidence remain unchanged. This
-contract adds a prospective downstream interface; it does not retrofit consumption claims
-into the first slice or treat its already-closed descriptors as live inputs.
+The first sealed-memfd slice and its frozen contracts remain unchanged. Normative inherited
+inputs are the snapshot-handoff acceptance specification, handoff-mechanism selection,
+correction review, runtime-trust-root design and H2 evidence declaration contract in
+`docs/e0/h2/`, all pinned at the correction base. Sections 1–3 below retain the previously
+reviewed source-boundary, claim and protected-input design. Sections 4–10 replace the former
+identity, witness, refusal and lifecycle provisions; no superseded provision is cumulative.
 
 ## 1. Real source path and the proposed consumption boundary
 
@@ -132,285 +125,434 @@ No other metadata change is allowed. Invocation arguments are exactly:
 `dont_inherit=true`, `optimize=0`. Types are exact bytes/str/str/int/bool/int;
 booleans cannot stand for integers. AST, code object and imported-module inputs refuse.
 
-## 4. Engine identity and independent observation
+## 4. B3 — three separate identity boundaries
 
-An expected identity descriptor must be frozen before any attempt, with retained hashes
-for engine executable, compiler-bearing library (if separate), supervisor, consumer adapter,
-observer and harness. It must name implementation/version, exact compiler entrypoint, launch
-argv, environment and working-directory policy. A mutable `python` PATH lookup, image tag,
-`sys.version` or source hash alone is insufficient. The live image/callable must be associated
-with that expected selection without a hash-to-launch or callable-rebinding gap.
+### A. Qualified surrogate, and only the surrogate
 
-This is minimum selected-consumer identity, not a full library/dependency lock. The real
-profile requires a reviewed mechanism for identifying the actual selected compiler callable
-and observing its entry with the complete argument tuple. That mechanism and concrete
-engine pins are **not yet supplied by the repository**. Missing qualification must produce
-PROFILE_UNQUALIFIED; implementers may not improvise a Python wrapper, tracing hook or audit
-hook and claim it is equivalent. Qualification must document whether a probe sees original
-bytes or transformed input, whether it can veto before entry, and what bypasses it covers.
-An event reporting outgoing intent or only a filename is insufficient.
+The receiver is a fixed, top-level Python function named `receive`, profile
+`ns001.h2a2.compile-input-surrogate.v1`, with precisely six positional arguments from
+section 3 and no defaults, variadic arguments, keyword overrides, closures or callback
+parameters. Its only permitted body is checking these fixed types/values and returning
+`("surrogate_received",3,F)` on the positive path. It may count/hash/compare immutable
+bytes, but must not compile, evaluate, interpret, import, open files, launch processes,
+access clients/network, mutate input or resolve a pathname. `mode="exec"` is inert
+metadata, never an instruction to execute. Its returned tuple is not the independent witness.
 
-Independent observation must establish all of:
+Before testing, freeze exact SHA-256 identities of the retained implementation artifact
+containing receive, observer artifact, and harness artifact. Name receive by artifact-relative
+module name plus function name, and bind its live function/code-object references during
+trusted bootstrap. Observer and supervisor are distinct functions/state within the pinned
+harness/observer artifacts, not an unspecified fourth binary. Any supervisor source outside
+those artifacts is forbidden by this profile. Verify artifact bytes before bootstrap; trust
+that the reviewed bootstrap associates those bytes with these live functions. This is an
+explicit assumption, not proof of Python loaded-bytecode origin. Rebinding the receiver or
+its live code object after bootstrap is detected by comparison to the retained references.
+A version string or matching input hash cannot substitute for receiver association.
 
-1. Hooks/observers armed before the attempt; no earlier unbound entry occurred.
-2. Live A provenance/association, seals and complete read; A→B derivation and retained B.
-3. Expected consumer selected, exact incoming source object B and all five remaining
-   arguments at the receiving boundary, once. Record intent and observed entry separately.
-4. Independent protected-object read agrees byte-for-byte, and live identity checks show
-   the received B is the derivative retained for this attempt, not an equal-byte substitute.
-5. No payload reopen, source redirection, fallback or unapproved second invocation occurred.
-6. Terminal observation and required evidence finalized before ACCEPT is serialized.
+The surrogate requires NO Python executable hash, compiler-library hash, full Python build
+lock, stdlib/import/package closure or full ambient-environment closure. Those are not
+ACCEPT fields. The trusted interpreter/harness is a declared assumption. The two artifact
+roles may share a file; their identities are still recorded separately in the descriptor.
+No real executable-substitution guarantee follows from substituting a surrogate callable.
 
-The observer must be distinct from the delivery function and must not infer receipt from
-that function's success return. For the surrogate, an independently installed function-entry
-observer bound to the fixed surrogate code object observes incoming arguments before its
-body; a separately defined observer validates A and B. Counts come from entry events, not
-read counts or return values. Consumer substitution is checked before dispatch and on entry.
-This is a trusted harness boundary, not separate-process security.
+Bootstrap may load only the reviewed harness, observer, receiver and their declared test
+support before arming; its startup path is not the payload source channel. A harness filename
+on bootstrap argv is allowed and not confused with a payload filename. Scientific modules,
+clients and payload compilation are prohibited. Bootstrap runtime/import correctness is
+assumed, not verified here. The supervisor then sets up an exclusive synthetic working
+location, arms the monitors, and admits attempts through the fixed six-argument interface.
+No user-provided source selector, PATH lookup, environment lookup, stdin, `-m`, `-c` or script
+path can choose the payload or receiver during an attempt. The fixed request schema below
+has no such channel; a nonempty source-environment or a different channel/cwd policy refuses.
+This is explicit source-selection control, not a claim of a hermetic host environment.
 
-For a future real profile, qualification must supply equivalent or stronger actual-entry
-observation. Internal compiler correctness and downstream interpretation remain assumptions.
-Wrong/absent observation cannot be repaired by rerunning the attempted consumption.
+### B. Later real engine: additional facts, not yet proven
 
-## 5. Source selection, environment and no reopen
+A real profile would additionally need retained implementation/runtime family, exact
+version/build and interface documentation, executable and compiler-bearing image identities,
+association of the running consumer with those identities, actual compiler-callable entry,
+complete source argument/mode selection semantics, and a qualified receiving-entry observer.
+Its observer must distinguish original input from compiler-transformed data and document
+bypasses. No wrapper-intent report, surrogate trace or trusted-bootstrap assumption alone
+qualifies that actual compiler. This contract always refuses the real profile with
+PROFILE_UNQUALIFIED; it defines no real-engine ACCEPT path or implementation switch.
 
-At the selected bytes-callable interface no source pathname reopen is necessary. The fixed
-filename is diagnostic. Direct caller-supplied bytes avoid the source/module resolver for
-this one input; that fact does not prove ambient imports are globally blocked.
+### C. Full runtime lock: separate, unresolved
 
-Future test startup uses a reviewed fixed executable selection and empty user-supplied
-environment, with no credentials and no PATH lookup. Absolute launch arguments and an empty,
-exclusive temporary working directory are independently checked before arming. No source
-selection via stdin, `-m`, `-c`, filename argv, PYTHONPATH, PYTHONHOME, startup hooks or user
-site is allowed. Runtime-internal paths/stdlib imports needed to run the harness remain
-explicit trusted bootstrap inputs, not a proven lock. Unknown environment input refuses,
-even if thought harmless. No environment values containing secrets may enter evidence.
+Immutable interpreter/native/stdlib/package/import closure, reproducible offline installation,
+all environmental influences and later executed-code provenance remain outside this slice.
+Neither A nor identifying a consumer in B establishes those properties. Do not begin
+`dependency_runtime_lock` to implement the surrogate.
 
-The future surrogate has no source-open, evaluation, compilation, import, network, subprocess
-or callback behavior. It only accepts the fixed typed tuple, counts/hashes/compares and returns
-a fixed observation tuple. Test setup may create synthetic decoy paths before arming but
-must never consume them. Independent no-reopen and unexpected-call guards must cover the
-attempt interval; lacking coverage refuses. These guards are not a production sandbox.
-If actual engine initialization requires uncontrolled source staging or reads, STOP; do not
-add an immutable-file fallback to this profile.
+## 5. B1 — registration, durable ordering and recovery
 
-## 6. ACCEPT and ordered REFUSE contract
+### Identity and custody boundary
 
-ACCEPT requires the qualified profile, valid expected descriptors, fresh witnessed A,
-complete exact B derivation, expected consumer/callable, exact arguments, armed independent
-observers, one received-input event bound to B, no forbidden reopen or redirection, matching
-independent observation, and complete terminal records. Source execution success is neither
-required nor allowed in the surrogate. A real-profile entry can be evidenced even if a
-compiler later rejects syntax, provided the permitted terminal outcome is independently
-recorded; that outcome cannot turn missing entry evidence into ACCEPT.
+One supervisor exclusively owns a retained evidence store. Before accepting work it obtains
+an exclusive store lock; lock failure means no attempt starts. A retained `store.json` has
+exactly `schema="ns001.h2a2.store.v1"` and `namespace` (64 lowercase hex characters assigned
+and retained by the evidence custodian). The custodian must not reuse this namespace for a
+new/clone/reset store. Namespace assignment is a custody input, not derived from a timestamp
+or silently regenerated after restart. Uniqueness is within this preserved custody regime,
+not a mathematical global-uniqueness or adversarial anti-rollback claim.
 
-The evaluator uses the following fixed order. Before invocation any failed prerequisite
-stops dispatch. After an attempted entry, any newly discovered violation gives REFUSE.
-When several predicates fail in the finalized evidence, choose the first listed code;
-never retry a failed attempt. Where evidence cannot establish a predicate, use the missing
-observation/record code rather than invent a substantive violation.
+Under the lock reserve the next ordinal, one plus the largest existing attempt-directory
+ordinal, starting at 1. Names are ordinary positive decimal integers without leading zeros.
+Create that directory exclusively and synchronize its parent directory before preparation,
+payload acquisition or receiver entry. Never delete or reuse any reserved directory, even
+empty or malformed ones. Attempt ID is `namespace + ":" + decimal ordinal`. This is unique
+and deterministic given the preserved store inventory. Conflicting/unknown entries or a
+lost/rolled-back store stop work for custody review; no inferred safe ordinal.
 
-| Priority / stable code | Exact failed condition |
+The synchronized reservation is the start of a tracked attempt. Before it completes, no
+preparation or receiver entry may occur; failure there is a store-registration failure,
+not an invisible permitted consumption attempt. A reservation surviving a crash, even with
+no files, is visible and will be recovered as ABORTED. This closes the former pre-PREPARED
+gap. A crash before any reservation permits no consumer activity under this contract.
+
+### Exact minimum records and persistence
+
+Canonical serialization C in section 8 applies to every record. The store holds the frozen
+expected descriptor E under its hash before any attempt that references it. Immediately
+after reservation write `registration.json` with exactly:
+`schema="ns001.h2a2.registration.v1"`, `attempt_id`, `expectation_sha256`,
+`request_sha256`. The candidate request is retained as `request.json` (raw bytes even if
+malformed), with request_sha256 over those exact bytes. Write request before registration.
+Synchronize both files and the attempt directory before checks or consumer activity.
+A missing/partial registration or request is an interrupted reserved attempt, not deletable
+scratch space. Valid registration always names a valid retained expected E; missing E stops
+preparation and becomes a refusal/recovery fact, never current-host auto-approval.
+
+`events.jsonl` is append-only; each complete event is written and synchronized before the
+next permitted action. PREPARED is persisted only after preconditions; ATTEMPTED must be
+persisted and acknowledged by the supervisor before dispatch. Required witness bytes must
+be synchronized before a normal terminal event refers to their hash. Use file synchronization
+and synchronize directory entries when creating them, not just language-level flush.
+The fault model is process interruption with an honest filesystem honoring successful sync;
+media loss, malicious deletion, rollback, lying storage/kernel and process compromise are
+residual assumptions. A sync/write error stops dispatch immediately; preserve available
+bytes for recovery. No fallback store, retry of consumption or repair of an attempt.
+
+### State machine
+
+Registration is a durable precursor, not a successful validation state:
+
+- RESERVED/registered → PREPARED → ATTEMPTED → ACCEPTED or REFUSED.
+- RESERVED/registered → REFUSED for a precondition failure; no PREPARED fiction.
+- PREPARED → REFUSED if a later pre-entry condition fails before committed dispatch.
+- Any nonterminal reserved attempt → ABORTED by recovery after interruption.
+
+ACCEPTED and REFUSED are terminal and immutable. ABORTED is a terminal recovery disposition,
+never a path to ACCEPTED or resumption. ATTEMPTED means committed dispatch, not proof of
+receiver entry. Pre-entry failure has `entered=false`; post-entry refusal reports actual
+observed entry. Missing entry evidence is unknown, not false. Unexpected early receiver
+entry is recorded by the lifetime sentinel from section 6; it is never laundered into a
+valid PREPARED/ATTEMPTED chain.
+
+On restart, inspect every reservation before admitting a new attempt. A well-formed normal
+terminal chain with valid referenced records remains terminal. Otherwise preserve ALL raw
+files unchanged and create a separate ABORTED recovery record. Recovery is idempotent: if
+its canonical bytes already exist and equal the independently recomputed expected result,
+return that disposition; conflicting bytes stop the store for custody review. An interrupted
+recovery write stays visible as a `.partial` file; after validating it as a prefix of the
+recomputed record, complete recovery via a fresh temporary file and atomic final rename,
+retaining the partial bytes. Never modify the original attempt journal. An invalid partial
+recovery file stops automatic recovery. No additional consumer entry occurs during recovery.
+
+Recovery explicitly binds both the entire raw journal and its maximal valid prefix, plus
+registration/request/witness bytes or absence. It cannot declare successful receipt from
+an incomplete normal attempt. Thus malformed/torn tails and pre-PREPARED crashes remain
+visible. ABORTED is a refusal of completeness, not evidence that the consumer did or did not
+run. The schemas in section 8 encode these bindings without inventing extra fields.
+
+## 6. B4 — independent witness and source-operation coverage
+
+### Independence and fixed observer location
+
+An in-process witness is sufficient for this offline synthetic claim, under a trusted
+harness/process assumption. No separate process is required. Its code path and state must
+be distinct from receive and the delivery adapter: the receiver gets only the six arguments,
+not the witness state, expected descriptor, writer or acceptance/finalization callback.
+Observer state retains A, the exact B reference, selected receiver/function code object,
+attempt ID and persisted ATTEMPTED acknowledgement. Consumer output cannot set witness facts.
+The supervisor separately validates serialized witness content before finalizing acceptance.
+
+Select a function-entry observer using the trusted Python profiling call-event interface,
+bound to the retained `receive.__code__` reference, observing that entry's actual argument
+locals before its body. A lifetime sentinel is installed before reservations and counts
+receiver-entry events even when the per-attempt observer is unarmed. These may be separate
+handlers driven by the same profiling dispatcher, with separate state. This explicitly
+supports the early-entry negative test. If the profiling mechanism is unavailable, replaced
+or already owned by an incompatible profiler, refuse; never silently use a returned tuple
+as evidence. The contract relies on trusted profiling/object semantics, not real native
+compiler-entry observability or hostile Python isolation.
+
+At the receiving event the witness independently determines exact type, length and SHA-256
+of actual source bytes; compares the reference to retained B; checks all five other typed
+parameters; verifies receiver code identity; and checks A's live provenance/association,
+length and Q. It separately reads A with the same bounded complete-read rule and compares
+its bytes to the received source. It does not reuse the consumer's digest or result.
+Keep A/B/receiver references live through terminal observation; equal-byte B replacement
+fails reference association. Record actual return via the corresponding return event and
+match it to the one call frame retained privately. An exception/aborted return is not the
+fixed tuple; no arbitrary repr or exception text is serialized.
+
+### No-reopen/fallback coverage in this bounded process
+
+The reviewed delivery adapter, receiver and observer have no payload pathname operations.
+All test-adapter requests for payload open/reopen, source-channel redirect or fallback go
+through a fixed harness guard that records the request and denies it before I/O. Supported
+operation labels are exactly `payload_open`, `payload_reopen`, `filesystem_fallback`,
+`source_redirect`. Payload source access after sealing is through retained descriptors only.
+Audit of the pinned attempt code must find no direct bypass via open/io/Path, /proc or /dev
+aliases, imports, mmap, callback, subprocess or native extension calls; unsupported paths
+make qualification fail rather than extending the claim. Evidence-journal writes by the
+supervisor and pre-sealing synthetic acquisition are separate, allowed operations, not
+payload reopen. This is coverage of the fixed trusted program and deliberate test adapters,
+not interception of every hostile process syscall. A bypass contrary to reviewed code is
+outside the trusted-process assumption and never called a verified sandbox.
+
+### Exact retained witness
+
+One separate canonical `witness.json` is finalized before a normal terminal event. It has
+exactly these keys (null means genuinely unavailable/unreached, not presumed success):
+
+- `schema`: `ns001.h2a2.consumption-witness.v1`; `attempt_id`; `expectation_sha256`.
+- `consumer_sha256`, `observer_sha256`, `harness_sha256`: expected artifact hashes;
+  `entrypoint`: observed qualified name or null.
+- `observations`: ordered array of records defined below.
+- `violations`: unique stable refusal codes in section 7 rank order, independently supported
+  by observations and the retained request; never invented to match an expected test result.
+
+Each observation has exactly `index` (contiguous integer starting 0), `kind`, `data`.
+Allowed kinds and exact data keys:
+
+| kind | data fields and meaning |
 | --- | --- |
-| 01 RECORD_INVALID | Invalid schema/types/canonical bytes, duplicate/unknown/missing fields, invalid sequence or cross-attempt reference. |
-| 02 PROFILE_UNQUALIFIED | Real profile lacks reviewed engine/observer qualification, or profile is unknown. |
-| 03 EXPECTATION_INVALID | Expected identities absent/malformed or derived from candidate observations rather than frozen descriptor. |
-| 04 WRONG_PROTECTED_OBJECT | Presented A lacks witnessed provenance, expected membership/association, type, size or exact Q. |
-| 05 WRONG_LOADER | Executable/compiler-bearing image or live consumer code identity differs from expected. |
-| 06 SOURCE_REDIRECTION | Unexpected environment, PATH selection, cwd policy or redirected source channel. |
-| 07 WRONG_ENTRYPOINT | Consumer entrypoint or fixed input parameters differ, including alternate filename/mode/flags. |
-| 08 OBSERVER_NOT_ARMED | Entry precedes hook establishment or any unbound prior invocation is observed. |
-| 09 PATHNAME_REOPEN | Any attempted payload pathname reopen or filesystem fallback after validation, whether bytes match or not. |
-| 10 OBJECT_SUBSTITUTION | Previously valid A or B is replaced after binding, including equal-byte replacement or different FD object. |
-| 11 INPUT_IO | Derivative read errors or returns fewer bytes than min(observed size,4); no inferred truncation. |
-| 12 INPUT_TYPE | B is not exact bytes. |
-| 13 INPUT_TRUNCATED | A complete observed byte argument has length below 3. |
-| 14 INPUT_APPENDED | A complete observed byte argument has length above 3. |
-| 15 INPUT_ALTERED | Length 3 but wrong bytes/hash. |
-| 16 INVOCATION_COUNT | More than one entry, or normal terminal completion without exactly one expected entry. |
-| 17 OBSERVATION_MISSING | Required independent association/read/entry/no-reopen evidence absent or mutually inconsistent. |
-| 18 ATTEMPT_INCOMPLETE | Crash/abort/lost terminal observation or truncated valid journal prefix; never infer acceptance. |
+| `protected` | `valid` bool, `initial` bool, `association` bool, `seals_exact` bool, `length` nonnegative int or null, `sha256` hash or null. Initial record describes admission; later record checks retained association. |
+| `derived` | `type` bytes/nonbytes, `length` int or null, `sha256` hash or null, `from_retained_A` bool, `reference_retained` bool. Values come from the actual derivative candidate, not expected input. |
+| `qualification` | `profile_allowed` bool, `capability_qualified` bool, `consumer_sha256` observed artifact hash or null, `artifact_match` bool, `callable_match` bool, `entrypoint` observed name or null, `parameters_match` bool, `source_selection_valid` bool. Independent Q/I checks against E and the retained request, including live receiver references. |
+| `armed` | `sentinel_active` bool, `entry_hook_active` bool, `guard_active` bool, `consumer_bound` bool. |
+| `dispatch` | `attempted_event_sha256` hash, `persisted` bool. Written only after actual sync acknowledgement. |
+| `entry` | `consumer_match` bool, `entrypoint` ASCII string, `source_type` bytes/nonbytes, `length` int or null, `sha256` hash or null, `same_B` bool, `same_A` bool, `independent_A_equal` bool or null, `parameters_match` bool, `parameters` as below, `after_dispatch` bool, `hook_armed` bool. |
+| `guard` | `operation` one of the four guard labels, `denied` bool. |
+| `return` | `matches_entry` bool, `result` fixed_tuple/other/aborted. |
+| `end` | `entry_count` nonnegative int from sentinel, `observer_entry_count` nonnegative int, `same_A` bool or null, `seals_exact` bool or null, `no_reopen` bool, `guard_coverage` bool, `outcome` returned/precondition_refused/aborted. |
 
-Input-corruption tests must isolate 11–15 before an entry occurs; they must not also substitute
-a bound object and expect a lower-priority input code. Missing entry evidence is 17; observed
-zero entries on otherwise complete normal termination is 16; a crash without entry proof is
-18 when other required observations up to that point are present. An unbound consumer call
-before PREPARED is 08 in a recovered refusal record; it cannot become a normal ACCEPT.
-A post-binding wrong source/object is 10 even when its bytes also differ. Refusals do not
-claim prevention if discovered after entry: `attempted` and observation records expose that.
+`parameters` is null if no well-typed five-parameter tuple was available; otherwise an
+object with exactly `filename`, `mode`, `flags`, `dont_inherit`, `optimize`, carrying actual
+ASCII strings/int/bool/int values. Unsupported types or non-ASCII strings are not coerced:
+parameters=null and parameters_match=false. Nonbytes source has length/hash null. Reference
+comparisons and descriptor associations are performed live; only their logical results
+are serialized. Their truth remains a trusted-witness assumption. Numeric IDs and volatile
+addresses cannot substitute for observations.
 
-## 7. Bounded future substitution matrix
+The positive sequence is exactly: protected(initial=true), derived, qualification, armed,
+dispatch, entry, protected(initial=false), return, end. Qualification's booleans are all
+true and its artifact/name match E. Entry's protected read/check is independent; the
+following protected record records its results. Positive end counts are both 1 and all
+required association/coverage checks true; return is fixed_tuple/matches_entry=true.
+The profiler may collect the return before other code persists observations, but must retain
+its observed order. All records are assembled in event order, not reordered to fit ACCEPT.
+A guard event may occur anywhere after initial protection; it always prevents acceptance.
+Early-entry tests may have an entry before armed/dispatch, reported by the sentinel with
+hook_armed=false. Unknown facts are null or absent observations, never synthesized passes.
+No additional observation kinds are permitted. Negative runs preserve actual observation
+order: preparation kinds occur at most once in their listed order; dispatch at most once;
+each observed entry has its own following protected check and return when those occur.
+Repeated entry/return groups are retained for invocation-count faults. Sentinel-observed
+premature entries may precede the preparation kinds; do not reorder them. Guard records
+may interleave after protection. End occurs exactly once and last in a normal witness.
+An interrupted witness may be a prefix; normal REFUSED requires an end record.
+No witness result is inferred from expected bytes. Removing an entry/association record
+while leaving a valid consumer return must lead to OBSERVATION_MISSING. The terminal event
+binds the entire witness SHA-256, so attachment swapping or a witness from another attempt
+is a detectable mismatch. The witness contains no terminal-event hash; there is no cycle.
 
-One positive P01: fresh exact fixture, witnessed Q/A→B, fixed tuple and expected surrogate,
-one armed incoming-argument observation, matching independent read and complete record.
-A fresh equal repetition must produce byte-identical canonical terminal evidence (same
-fixed case label and expected descriptors); freshness is not claimed by that equality.
+## 7. B2 — staged validation and single-code precedence
 
-| Case | Injection / required result |
+Preserve the eighteen names, but the following predicates/order replace the old priority
+numbers. A candidate request is not the frozen descriptor or evidence journal. Missing or
+malformed candidate expectation fields are EXPECTATION_INVALID; malformed evidence records
+are RECORD_INVALID. Initial A admission and later substitution are separate phases.
+
+Preparation phases run in this exact order and stop on first failure: protected object (P),
+derivative (D), receiver qualification (Q), source selection/invocation (I), then hooks (H).
+E and request structural checks precede P. Retain observed secondary facts without running
+new phases just to accumulate diagnostics. After ATTEMPTED, only monitoring/final evidence
+checks apply; do not reclassify later A substitution as failed initial admission.
+
+For a normally completed attempt, form the set of evidenced applicable codes below and
+choose the smallest rank. Serialize exactly ONE `primary_code`; diagnostics contains only
+the other supported codes, unique and rank ordered. Missing evidence does not imply that
+an unobserved higher-ranked substantive violation occurred.
+
+| rank / code | Phase and exact trigger; isolated reachability test |
 | --- | --- |
-| N01 | Wrong initial protected object, including equal-byte unrelated memfd → WRONG_PROTECTED_OBJECT. |
-| N02 | Incomplete positioned read from correctly sized A → INPUT_IO. |
-| N03–N05 | Complete derivative candidate truncated/appended/same-length altered before binding → INPUT_TRUNCATED / INPUT_APPENDED / INPUT_ALTERED. |
-| N06 | Mutable/text/subclass derivative → INPUT_TYPE. |
-| N07 | After valid binding give a different live A/FD object → OBJECT_SUBSTITUTION. |
-| N08 | Valid A exists but another source B is delivered; test different-byte and equal-byte objects → OBJECT_SUBSTITUTION. |
-| N09 | Alter a decoy source pathname, then attempt reopen → PATHNAME_REOPEN; no decoy execution or read needed. |
-| N10 | Substitute expected executable/consumer selection → WRONG_LOADER before dispatch. Real executable substitution remains unproven by a surrogate stand-in. |
-| N11 | Invocation filename/entrypoint selects another source → WRONG_ENTRYPOINT. |
-| N12 | PATH/environment/cwd or input channel redirects selection → SOURCE_REDIRECTION; include PYTHONPATH and PYTHONHOME separately. |
-| N13 | Entry before hooks armed / without prepared binding → OBSERVER_NOT_ARMED. |
-| N14 | Remove independent entry/association evidence while consumer result remains valid → OBSERVATION_MISSING. |
-| N15 | Controlled abort after ATTEMPTED with valid prefix and no terminal outcome → ATTEMPT_INCOMPLETE. |
-| N16 | Filesystem fallback after protected read failure proposed by adapter → PATHNAME_REOPEN when observed; never perform it to obtain a positive. |
-| N17 | Extra entry, and separately no entry on normal completion → INVOCATION_COUNT. |
-| N18 | Change attempt linkage, omit schema field or duplicate key → RECORD_INVALID. |
-| N19 | Missing expected identity descriptor → EXPECTATION_INVALID. |
-| N20 | Request real profile without qualified engine/observer → PROFILE_UNQUALIFIED. |
+| 1 RECORD_INVALID | Evidence journal/registration/witness has a complete but schema-invalid, noncanonical, wrong-ID/hash-linked record. Test complete altered witness linkage. Not candidate request validation; torn tail is handled by recovery below. |
+| 2 EXPECTATION_INVALID | Candidate request absent/malformed or candidate expected-descriptor hash does not equal retained frozen E; E unavailable/invalid before dispatch. Test omitted candidate expected hash. |
+| 3 WRONG_PROTECTED_OBJECT | P only: initial A type, size, Q, expected identity or witnessed origin/association invalid. Test unrelated equal-byte initial memfd. |
+| 4 INPUT_IO | D only: bounded derivative read errors or is incomplete relative to min(observed size,4). Test short read of correctly sized A. |
+| 5 INPUT_TYPE | D only: derivative candidate not exact bytes. Test bytearray candidate through labelled adapter. |
+| 6 INPUT_TRUNCATED | D only: complete bytes candidate length less than 3. Test complete two-byte candidate before binding. |
+| 7 INPUT_APPENDED | D only: complete bytes candidate length greater than 3. Test complete four-byte candidate before binding. |
+| 8 INPUT_ALTERED | D only: length 3 but full bytes/hash differ. Test altered candidate before binding. |
+| 9 PROFILE_UNQUALIFIED | Q: requested profile is not the fixed surrogate (real included), or declared program/observer capability audit is unqualified. Test real-profile request. |
+| 10 WRONG_LOADER | Q: selected receiver artifact/function/code reference mismatches frozen surrogate identity. Also post-Q receiver rebinding detected at dispatch/entry. Test different live receiver, not Python executable substitution. |
+| 11 SOURCE_REDIRECTION | I: source channel not protected_bytes, nonempty source_environment, or different cwd policy. Also guard source_redirect request. Test PYTHONPATH source override. |
+| 12 WRONG_ENTRYPOINT | I: selected entrypoint or typed five input parameters differ from fixed tuple. Also differing actual parameters at entry. Test alternate diagnostic filename. |
+| 13 OBSERVER_NOT_ARMED | H: required hook/guard not active; or sentinel witnesses entry without armed hook and persisted ATTEMPTED acknowledgement. Test premature entry with sentinel still active. |
+| 14 PATHNAME_REOPEN | Monitoring: guard witnesses any payload_open/payload_reopen/filesystem_fallback request after validation. Denial still counts. Test denied decoy reopen. |
+| 15 OBJECT_SUBSTITUTION | After successful admission/binding only: retained A association or B reference changes at dispatch/entry/final check. Test equal-byte replacement B or A. Never code 3 for this phase. |
+| 16 INVOCATION_COUNT | Normal completion, reliable active sentinel evidence: count differs from 1 for a dispatched attempt. Test two entries or no entries with intact monitoring. No count requirement for precondition refusal. |
+| 17 OBSERVATION_MISSING | Normal completion with missing/inconsistent required independent association, argument, coverage, entry or end evidence not already classified as structurally invalid. Test remove independent entry but keep valid return. A null unknown fact cannot satisfy ACCEPT. |
+| 18 ATTEMPT_INCOMPLETE | Nonterminal attempt, interruption, incomplete/torn tail or absent normal terminal record: recovery disposition ABORTED only. Test interruption after ATTEMPTED. |
 
-These are adapter/boundary refusal tests, not fuzzing, compiler attacks or E0 runs. Tests
-must use actual received arguments for binding checks, not an expected receipt substituted
-for observed behavior. A stand-in for an executable identity failure must be labelled as
-such; it does not prove kernel process-image enforcement. If multiple injections occur,
-assert the ordered code and preserve all independently observed violations.
+Recovery has a deterministic completeness decision before normal evaluation: if there is
+no fully validated normal terminal chain, produce ABORTED. Its primary code is RECORD_INVALID
+if any retained COMPLETE record is structurally invalid; otherwise ATTEMPT_INCOMPLETE.
+A partial final line/file is an interrupted write, not a complete invalid record. Earlier
+supported violations are diagnostics only for recovery; incomplete attempts are never
+normal ACCEPT/REFUSE. Thus a torn tail cannot ambiguously select codes 1 versus 18.
+A retained normal terminal with invalid evidence is preserved raw but is not a valid
+terminal chain; recovery documents its invalidity rather than rewriting it.
 
-## 8. Complete attempt record and canonical serialization
+ACCEPTED requires no applicable refusal, positive witness sequence, exact F/length/B link,
+qualified surrogate/parameters, one receiving event after persisted ATTEMPTED, fixed return,
+complete no-reopen coverage and synchronized witness. It says nothing about compilation or
+source execution. Normal precondition REFUSED may have zero entries and partial witness
+observations ending in precondition_refused; it is not missing-entry refusal. Nonterminal
+normal failure records are not retroactively completed from inferred observations.
 
-This section fixes the logical evidence model; no files are created by this circuit.
-A future supervisor must create an exclusive new evidence location, never truncate or
-resume an old attempt, and retain incomplete prefixes on failure. A fixed `case_id` is a
-test label, not a unique cryptographic run identity. An external custodian associates the
-exclusive attempt location with its records. Replay resistance is outside this slice.
+## 8. Exact record schemas and deterministic encoding
 
-Canonical C: UTF-8 JSON, ASCII strings only, keys lexicographically sorted, no insignificant
-whitespace, no duplicate keys, exactly the schema fields, integers in ordinary base-10
-(no float/exponent/negative zero), booleans as true/false, null as null, no BOM, final LF
-for each journal record. Reject input not equal to its canonical reserialization. Standard
-JSON escaping applies; slash unescaped; control characters forbidden in field values.
-Hashes are lowercase 64-hex SHA-256 of exact canonical bytes including LF. No timestamps,
-PID, numeric FD/inode, temporary path or random ID in canonical output. Raw host observations
-may live in a separately retained noncanonical witness attachment; canonical evidence binds
-its logical facts, not volatile identifiers or a volatile attachment hash.
+C is UTF-8 ASCII-only JSON with keys sorted lexicographically, no whitespace except one
+final LF, no BOM, unique keys, exact fields, ordinary decimal integers (no negative zero,
+exponents or floats), JSON booleans/null, minimal JSON escaping (quote/backslash only;
+control characters forbidden in strings), slash unescaped. Reject any noncanonical input.
+Hash means SHA-256 of exact bytes including LF, lowercase 64 hex. No time/PID/FD/inode/
+temporary path appears in canonical records. Hash raw invalid evidence without normalizing it.
 
-Expected descriptor E has exactly these fields:
-`profile` (one of the two names), `case_id` (P01 or N01…N20, optional decimal subcase suffix
-joined by a dot), `spec_sha256`, `engine_sha256`, `compiler_image_sha256`,
-`adapter_sha256`, `observer_sha256`, `harness_sha256` (all hashes), `engine_label`,
-`entrypoint` (nonempty ASCII strings), `input_sha256` (F), `input_length` (3),
-`manifest_sha256` (M), `root_sha256` (S), `filename` (fixed diagnostic label),
-`mode` (exec), `flags` (0), `dont_inherit` (true), `optimize` (0),
-`launch_argv` (ordered ASCII string array), `environment` (empty object),
-`cwd_policy` (`exclusive-empty-temp`). In the surrogate, compiler_image_sha256 equals
-engine_sha256 and explicitly identifies the host executable only, not a used compiler.
-Concrete engine/code hashes and absolute launch argv must be frozen in a separately reviewed
-implementation plan before tests, not auto-approved from current observations. The spec hash
-is external to this document, avoiding self-reference. A negative expectation test preserves
-both the frozen E and the invalid candidate in its witness evidence.
+Frozen E has exactly: `schema="ns001.h2a2.surrogate-expectation.v1"`, `spec_sha256`,
+`consumer_sha256`, `observer_sha256`, `harness_sha256` (retained artifact hashes),
+`entrypoint` (artifact module + `.receive`), `interface="bytes-six-positional.v1"`,
+`profile="ns001.h2a2.compile-input-surrogate.v1"`, `input_length=3`, `input_sha256=F`,
+`manifest_sha256=M`, `root_sha256=S`. These are independently reviewed expectations frozen
+before the acceptance run; computed observations cannot overwrite them. Spec hash is computed
+externally; this document does not embed its own hash. No runtime binary fields are required.
 
-Every event has exactly:
-`schema` (`ns001.h2a2.consumption-event.v1`), `expectation_sha256` (hash of C(E)),
-`sequence` (0-based contiguous int), `state` (below), `attempted` (bool), `code`
-(null or table code), `previous_sha256` (null for first, otherwise previous C(event) hash),
-`facts` (object specified below). Unexpected/missing fields refuse. Events are append-only;
-flush PREPARED and ATTEMPTED before dispatch. This is a trusted-supervisor durability
-requirement, not an assertion of power-loss durability from language buffering alone.
+Candidate request has exactly: `expectation_sha256`, `profile`, `entrypoint`,
+`source_channel`, `source_environment` (ASCII string-to-string object), `cwd_policy`,
+`parameters` (five-field object from section 6), `case_id` (P01 or N01…N20, optionally dot plus
+positive decimal subcase integer). It carries no payload pathname. The valid values are E's
+profile/entrypoint, protected_bytes, empty object, exclusive-synthetic, and section 3's exact
+parameters. Malformed structure/types yield EXPECTATION_INVALID; well-typed but wrong values
+reach their specific Q/I predicates. Source object A and derivative candidate are live harness
+inputs associated with request/attempt, not JSON-deserialized capabilities.
 
-- PREPARED: sequence 0, attempted=false, code=null. facts has exactly `profile_qualified`,
-  `expectations_valid`, `protected_valid`, `consumer_valid`, `selection_valid`,
-  `observers_armed`, `derivative_valid` (all true). Not written if these checks fail.
-- ATTEMPTED: sequence 1, attempted=true, code=null; facts is exactly `{}`. This means
-  dispatch has been committed, not that the consumer actually entered.
-- ACCEPTED: sequence 2, attempted=true, code=null; facts is exactly W below. It is written
-  only after receiving-boundary and terminal evidence is complete and every acceptance
-  predicate holds. Real profile claim and surrogate profile claim must remain distinct.
-- REFUSED: terminal at sequence 0, 1 or 2 after the corresponding valid prefix, code is
-  mandatory, attempted equals whether ATTEMPTED exists (or unbound entry was observed).
-  facts is W with unknown/unreached values null. Pre-dispatch failure permits a lone REFUSED.
-  Do not fabricate PREPARED facts to fill a failed precondition.
+Journal event has exactly: `schema="ns001.h2a2.consumption-event.v1"`, `attempt_id`,
+`sequence` (0-based contiguous), `state`, `primary_code` (null or one code), `diagnostics`
+(rank-ordered other codes), `previous_sha256` (null for 0, preceding event hash otherwise),
+`witness_sha256` (null until terminal), `entered` (bool or null).
 
-W has exactly: `protected_valid`, `derivation_bound`, `consumer_valid`, `selection_valid`,
-`observers_armed`, `same_derivative`, `independent_agreement`, `no_reopen` (bool or null);
-`received_length` (nonnegative int or null), `received_sha256` (hash or null),
-`entry_count` (nonnegative int or null), `terminal_outcome` (null or one of
-`surrogate_returned`, `compiler_returned`, `compiler_rejected`, `aborted`). ACCEPTED requires
-all booleans true, length 3, F, count 1 and the appropriate non-aborted outcome.
-Independent entry witness must also check the exact tuple against E; selection_valid includes
-that comparison. W is the canonical summary, not an authenticated witness by itself.
+- PREPARED: first event, no code/diagnostics/witness, entered=false. Requires all phases pass.
+- ATTEMPTED: after PREPARED, no code/diagnostics/witness, entered=null. Sync before dispatch.
+- ACCEPTED: after ATTEMPTED, null code, empty diagnostics, witness hash mandatory, entered=true.
+- REFUSED: first event, after PREPARED, or after ATTEMPTED; one code other than
+  ATTEMPT_INCOMPLETE, witness hash mandatory, entered from actual observations (or null
+  if unknown). No further journal events after normal terminal. Witness required even for
+  ordinary precondition refusal; lack of it leads to ABORTED recovery, not a fabricated file.
 
-Separate incoming-argument and protected-object witness observations must be retained and
-independently checked before constructing W. Their source and complete logical evidence must
-be available to a reviewer; a consumer's returned W or self-asserted true fields are not
-acceptable. Live object relations are witnessed while references remain live; addresses and
-FD numbers may not be reconstructed from hashes after the fact.
+Recovery file `recovery.json` has exactly:
+`schema="ns001.h2a2.consumption-recovery.v1"`, `attempt_id`, `state="ABORTED"`,
+`primary_code`, `diagnostics`, `registration_sha256`, `request_sha256`, `witness_sha256`
+(each raw hash or null if absent), `journal_sha256` (hash of entire raw file, or null if absent),
+`journal_length` (0 if absent, otherwise byte count), `valid_prefix_sha256` (hash of exact
+maximal valid prefix bytes; empty-byte hash if none), `valid_prefix_length`,
+`last_valid_sequence` (int or null), `entered` (bool or null from retained evidence only).
+This distinct schema explicitly encodes the missing B1 prefix binding. Recovery never uses
+an expectation hash as a substitute for attempt identity. Empty/missing journal differ via
+journal_sha256. Recovery does not hash itself. Complete record invalidity and supported
+secondary violations determine codes per section 7. Recovery with only an empty reservation
+has all absent file hashes null, lengths 0, empty-prefix hash, entered=null and primary
+ATTEMPT_INCOMPLETE. This is a deterministic distinct terminal disposition for that ID.
 
-On controlled abort the supervisor appends REFUSED/ATTEMPT_INCOMPLETE to a valid prefix.
-On supervisor crash, retain the prefix verbatim; a separate recovery report references its
-hash and reports ATTEMPT_INCOMPLETE, without appending fictitious original events or resuming
-the attempt. Malformed/truncated final record is retained raw; the reviewer records the
-last valid prefix and refuses. No missing terminal record ever counts as ACCEPT. Recovery
-reports use the same event schema as a standalone REFUSED, sequence 0, previous_sha256=null,
-and W null except terminal_outcome=aborted; expectation_sha256 identifies E. Their distinct
-external recovery location prevents misrepresenting them as the original journal.
+Canonical witnesses bind attempt IDs and expected descriptors; terminal events bind witness
+bytes; recovery binds raw retained bytes. The expected source artifacts supply the reviewed
+meaning of live comparisons. No cryptographic authenticity against a malicious witness is
+claimed. Custody of the store, reservations and namespace is a required residual assumption.
 
-## 9. Runtime-lock separation and smallest future slice
+Equal repetitions allocate different attempt IDs and therefore different whole-record hashes.
+This intentionally replaces the earlier full-record byte-equality rule to satisfy unique
+attempt identity. Determinism means equal full inputs INCLUDING attempt ID and observations
+serialize identically. Tests must compare repeated serialization of the same retained record,
+and compare repeat-run semantic observations after removing only attempt_id and its derived
+link hashes; they must not reuse IDs or discard originals to manufacture byte equality.
+The completed first slice's historical deterministic-ACCEPT claim is unchanged.
 
-A bounded observation can establish that identified top-level input B reached an identified
-entry under explicit trusted-engine/observer assumptions. It does not establish immutable
-transitive runtime, interpreter implementation correctness, imports, native libraries,
-bootstrap loading, reproducible installation or every later code-generation path. These
-remain `dependency_runtime_lock` and subsequent external-trust-root evidence obligations.
-The real consumer still needs minimum qualified identity; deferring the full lock does not
-permit an arbitrary or unobserved engine. If minimum identity cannot be established without
-full locking, STOP and record the dependency instead of silently beginning that gate.
+## 9. Bounded acceptance matrix and future implementation scope
 
-**One smallest future implementation slice:** additive offline bytes-callable surrogate
-using the fresh inert `abc` sealed-object derivative and the exact six-argument interface
-above, fixed receiver and independent receiving-entry observer, P01/repetition and the bounded
-N matrix. The receiver must never call compile/exec/eval/import, obtain a client, launch a
-child, or access a network. Scientific paths and real E0 entrypoints are unavailable as
-inputs. Receipt profile is always surrogate; a request for real profile refuses. The test
-harness may inspect and hash its own approved inputs but cannot discover or run scientific
-modules. No implementation file or test is created here, and no existing first-slice file
-is authorized to change. Any reuse of first-slice logic must preserve its frozen behavior.
+One positive P01 uses fresh exact inert abc, retained A→B, qualified fixed receive, armed
+witness/sentinel, persisted ATTEMPTED, the exact positive observation sequence, separate
+witness and terminal ACCEPTED. Repeat fresh P01 and verify deterministic serialization and
+semantic equality as section 8 specifies. No compiler function or E0 source is called.
 
-This faithfully models the bytes-argument input interface and substitution boundary only.
-It does not model compiler internals or prove real compiler entry. Selection/qualification
-of actual engine observation remains a later document decision; replacing the surrogate with
-compile is a scope change requiring explicit authorization, not a configuration option.
+Retain N01–N20 with these exact tests/results under section 7:
+N01 initial unrelated A → WRONG_PROTECTED_OBJECT;
+N02 short derivative read → INPUT_IO;
+N03/N04/N05 complete short/long/altered pre-binding candidate → INPUT_TRUNCATED,
+INPUT_APPENDED, INPUT_ALTERED;
+N06 nonbytes → INPUT_TYPE;
+N07 post-admission A substitution → OBJECT_SUBSTITUTION;
+N08 post-binding B substitution, both different and equal bytes → OBJECT_SUBSTITUTION;
+N09 denied altered-decoy pathname reopen → PATHNAME_REOPEN;
+N10 wrong surrogate receiver → WRONG_LOADER;
+N11 wrong typed parameter/entrypoint → WRONG_ENTRYPOINT;
+N12 source-channel/environment/cwd redirection → SOURCE_REDIRECTION;
+N13 sentinel-observed unarmed/premature entry → OBSERVER_NOT_ARMED;
+N14 remove independent entry/association evidence with valid return → OBSERVATION_MISSING;
+N15 interrupted attempt → ABORTED/ATTEMPT_INCOMPLETE;
+N16 observed proposed filesystem fallback → PATHNAME_REOPEN;
+N17 reliably counted zero/two entries → INVOCATION_COUNT;
+N18 complete witness wrong-ID/schema corruption → RECORD_INVALID;
+N19 missing candidate expectation hash → EXPECTATION_INVALID;
+N20 real/unknown profile request → PROFILE_UNQUALIFIED.
 
-## 10. Abort conditions, preservation and disposition
+N15 requires interruptions after reservation, registration, PREPARED, ATTEMPTED and during
+a final journal write; each stays visible and recovers idempotently without consumer retry.
+Recovery after a complete valid ACCEPTED/REFUSED leaves it unchanged. N18 additionally checks
+that a complete invalid record yields ABORTED/RECORD_INVALID in recovery, while a torn tail
+yields ABORTED/ATTEMPT_INCOMPLETE. N14 includes attempted witness swapping between two IDs;
+wrong-ID is RECORD_INVALID, omission alone OBSERVATION_MISSING. These are repairs to the
+existing boundaries, not broad fuzzing. Phase tests must preserve earlier passing conditions;
+adapters that inject corrupt candidates are explicitly synthetic, not kernel failures.
+For combined faults assert rank order, e.g. post-binding A substitution plus denied reopen
+chooses PATHNAME_REOPEN and records OBJECT_SUBSTITUTION as a diagnostic. Never execute an
+uncontrolled path merely to demonstrate refusal. Guards deny attempted source operations.
 
-STOP rather than improvise if the actual proposed boundary cannot be identified; independent
-incoming-input observation is unavailable; exact parameters/identity pins are missing; a
-loader needs uncontrolled pathname reopening; a new staging backend or transformation is
-needed; protection/object association cannot be retained; real compilation/execution would
-be needed under surrogate authority; E0/scientific imports become reachable; minimum engine
-identity is inseparable from full runtime locking; or evidence requires credentials,
-network, live clients or unpublished state. Missing evidence remains PARTIAL/NOT VERIFIED.
+One smallest future circuit is an additive offline synthetic harness/receiver/witness that
+demonstrates protected A → immutable B → qualified surrogate receive → independent witness
+→ deterministic terminal evidence, including bounded controlled interruption/recovery tests.
+It cannot execute scientific source, compile payload, import a client, access credentials/
+network, invoke live runtime integration or E0, or resolve dependency_runtime_lock. The
+trusted Python harness executes its own test logic only under separate future authorization.
+No runtime invocation or implementation is authorized in this document correction.
 
-Pre-commit preservation check: all 203 pre-existing tracked files match reviewed HEAD;
-only this new specification changed. The completed first slice's implementation SHA-256 is
-`d15ddd0b3d689592398987e62ce3135ee8a61e48ccd48cfa511d4870ac0b0023` and harness SHA-256 is
-`67150d764cfde33e1d72837cf3ec518c3469a7f617ec19808d30c0762434b647`, unchanged.
-H2A1, scientific artifacts, frozen contracts and prior receipts are unchanged. No runtime,
-compiler/loader/client, tests or E0 were invoked; document inspection and Git operations only.
+## 10. Abort conditions and closing status
 
-- identified real consumption boundary: proposed Python bytes argument at compiler entry; existing feasibility pathname/import routes inspected; live E0 entrypoint and actual engine/observer qualification remain unselected.
-- allowed claim: exact protected-byte derivative received at the qualified input boundary; surrogate success says only surrogate receipt, never actual compilation/execution.
-- prohibited claims: execution/runtime/compiler correctness, dependency/import/client/transport/response/scientific identity or correctness, E0 success and full-gate resolution.
-- protected consumption object: immutable exact bytes B, witnessed byte-preserving derivative of a fresh valid sealed A; not an FD passed as source.
-- loader/compiler identity requirements: frozen expected executable/compiler image and callable/observer/harness identity with live association; real profile blocked without qualification.
-- independent observation rule: receiving-entry arguments and live A→B association independently witnessed before evidence finalization; outgoing intent alone fails.
-- no-reopen rule: bytes delivery only; diagnostic filename cannot locate source; all payload reopens/fallbacks refuse.
-- ACCEPT criteria: all identity, binding, single-entry, independent observation and complete-record checks; no execution-success requirement.
-- REFUSE criteria: ordered stable codes 01–18; no retry, fallback or fabricated missing evidence.
-- substitution-test matrix: P01 with equal repetition and N01–N20 bounded cases; surrogate/real evidence never conflated.
-- attempt-record contract: canonical descriptor plus append-only PREPARED/ATTEMPTED/ACCEPTED or REFUSED events; preserved incomplete prefixes and distinct recovery refusal.
-- dependency_runtime_lock boundary: minimum consumer identification required; complete interpreter/import/library/dependency closure remains deferred and unresolved.
-- smallest future implementation slice: offline inert sealed-object-to-bytes-callable surrogate and independent entry observer only, after review and separate authorization.
-- abort conditions: unidentified/unobservable boundary, missing identity, uncontrolled reopen, changed mechanism, E0/runtime scope expansion, inseparable locking or external/live evidence dependency.
-- implementation-ready: PARTIAL; surrogate contract specified, actual compiler boundary lacks engine/observer qualification; no implementation authorized here.
-- external_trust_root status: first non-executing handoff verified; actual compiler-input boundary unproven; full gate unresolved.
+STOP on missing qualification artifacts, unavailable entry observation, unsupported profile,
+loss of custody/namespace/lock, failed durable registration, unavailable protection/association,
+unaccounted source operation, need for a different derivative or loading mechanism, or
+any requirement for real-engine invocation, runtime locking, scientific/client/network/E0
+activity. Preserve partial evidence; never repair a failed attempt into success.
+
+- B1 contract: durable unique reservation before preparation; persisted ATTEMPTED; terminal normal states; explicit hash-bound idempotent ABORTED recovery.
+- B2 contract: phase-specific predicates and fixed rank; one primary code with ordered supported diagnostics; deterministic separate recovery classification.
+- B3 contract: pinned surrogate artifacts/live callable under trusted bootstrap only; actual engine and full runtime closure deferred.
+- B4 contract: receiving-entry witness with own state/digest, exact separate serialization and terminal hash binding; in-process independence explicitly conditional.
+- implementation-ready: YES for the corrected surrogate contract, pending independent review and separate implementation authorization; actual engine profile unavailable.
+- external_trust_root status: first handoff slice independently VERIFIED; full gate and actual compiler consumption unresolved.
 - H2A1 status: VERIFIED for scoped prospective custody/publication auditability; unchanged.
-- H2A2 status: first slice independently VERIFIED; this downstream specification is prospective only; all eight full H2 gates unresolved.
+- H2A2 status: document correction only; completed first slice unchanged; all eight full H2 gates unresolved.
 - E0 status: HOLD.
-- one next bounded action only: independent document-only review of this acceptance specification, including its surrogate claim ceiling, observer qualification gap and attempt/refusal determinism.
+- one next bounded action only: independent document-only review of the corrected specification and correction receipt.
