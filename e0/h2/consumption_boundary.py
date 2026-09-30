@@ -150,33 +150,69 @@ class Store:
     """Single owner, retained monotonic reservations. No automatic cleanup."""
     def __init__(self, path, namespace, e):
         self.path = Path(path)
-        self.path.mkdir(exist_ok=True)
-        self.lock = os.open(self.path / 'lock', os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+        self.lock = None
         try:
+            if type(namespace) is not str or re.fullmatch('[0-9a-f]{64}', namespace) is None:
+                raise Stop('namespace')
+            if (type(e) is not dict or any(not typed(e[k], 'h') for k in
+                    ('consumer_sha256', 'observer_sha256', 'harness_sha256')) or
+                    e != expectation(e['consumer_sha256'], e['observer_sha256'], e['harness_sha256'])):
+                raise Stop('invalid expectation')
+            self.namespace, self.e = namespace, parse(C(e))
+            self.metadata = C(dict(schema='ns001.h2a2.store.v1', namespace=namespace))
+            self.expected_bytes = C(e)
+            self.pin = self.path / (H(self.expected_bytes) + '.json')
+            try:
+                self.path.mkdir()
+                fresh = True
+            except FileExistsError:
+                fresh = False
+            if self.path.is_symlink() or not self.path.is_dir():
+                raise Stop('invalid store root')
+            self.root_key = self._key(self.path.stat())
+            # Existing directories, even empty ones, are retained custody roots.
+            # Only exclusive creation above authorizes initial metadata writes.
+            flags = os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW
+            self.lock = os.open(self.path / 'lock', flags | (os.O_CREAT | os.O_EXCL if fresh else 0), 0o600)
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(self.lock)
-            raise Stop('store occupied') from None
-        if not re.fullmatch('[0-9a-f]{64}', namespace):
-            raise Stop('namespace')
-        self.namespace, self.e = namespace, e
-        meta = C(dict(schema='ns001.h2a2.store.v1', namespace=namespace))
-        if (self.path / 'store.json').exists():
-            if (self.path / 'store.json').read_bytes() != meta:
-                raise Stop('namespace conflict')
-        else:
-            persist(self.path / 'store.json', meta)
-        pin = self.path / (H(C(e)) + '.json')
-        if pin.exists():
-            if pin.read_bytes() != C(e):
-                raise Stop('expectation conflict')
-        else:
-            persist(pin, C(e))
-        self.scan()
+            self.lock_key = self._key(os.fstat(self.lock))
+            if fresh:
+                persist(self.path / 'store.json', self.metadata)
+                persist(self.pin, self.expected_bytes)
+                sync_dir(self.path.parent)
+            self.validate_custody()
+            self.scan()
+        except (OSError, ValueError, TypeError, KeyError, Stop):
+            if self.lock is not None:
+                os.close(self.lock)
+                self.lock = None
+            raise Stop('store custody unavailable or conflicting') from None
+
+    @staticmethod
+    def _key(info):
+        return info.st_dev, info.st_ino
+
+    def validate_custody(self):
+        """Recheck retained evidence; never repair it from cached/caller values."""
+        try:
+            if self.lock is None or self.path.is_symlink() or self._key(self.path.stat()) != self.root_key:
+                raise Stop('store unavailable')
+            for p in (self.path / 'lock', self.path / 'store.json', self.pin):
+                if not stat.S_ISREG(p.lstat().st_mode):
+                    raise Stop('custody file type')
+            if self._key((self.path / 'lock').stat()) != self.lock_key:
+                raise Stop('lock replaced')
+            if ((self.path / 'store.json').read_bytes() != self.metadata or
+                    self.pin.read_bytes() != self.expected_bytes or C(self.e) != self.expected_bytes):
+                raise Stop('custody mismatch')
+        except (OSError, ValueError, TypeError):
+            raise Stop('store custody unavailable or conflicting') from None
 
     def close(self):
-        fcntl.flock(self.lock, fcntl.LOCK_UN)
-        os.close(self.lock)
+        if self.lock is not None:
+            fcntl.flock(self.lock, fcntl.LOCK_UN)
+            os.close(self.lock)
+            self.lock = None
 
     def scan(self):
         ordinals = []
@@ -191,6 +227,7 @@ class Store:
         return sorted(ordinals)
 
     def reserve(self):
+        self.validate_custody()
         ids = self.scan()
         for n in ids:
             self.recover(n)
@@ -211,12 +248,25 @@ class Attempt:
         self.id = store.namespace + ':' + str(ordinal)
         self.events = []
 
+    def require_writable(self):
+        self.store.validate_custody()
+        recovery = self.path / 'recovery.json'
+        if recovery.exists() or recovery.is_symlink() or any(self.path.glob('recovery*.partial')):
+            raise Stop('recovered or interrupted-recovery attempt is terminal')
+        raw = read_optional(self.path / 'events.jsonl') or b''
+        if raw != b''.join(C(event) for event in self.events):
+            raise Stop('stale or interrupted attempt writer')
+        if self.events and self.events[-1]['state'] in ('ACCEPTED', 'REFUSED'):
+            raise Stop('terminal attempt')
+
     def register(self, raw):
+        self.require_writable()
         persist(self.path / 'request.json', raw)
         persist(self.path / 'registration.json', C(dict(schema='ns001.h2a2.registration.v1',
                 attempt_id=self.id, expectation_sha256=H(C(self.store.e)), request_sha256=H(raw))))
 
     def event(self, state, witness=None, reasons=(), entered=None):
+        self.require_writable()
         reasons = codes(reasons)
         if self.events and self.events[-1]['state'] in ('ACCEPTED', 'REFUSED'):
             raise Stop('terminal attempt')
@@ -248,6 +298,7 @@ def read_optional(path):
 
 
 def recover(store, n):
+    store.validate_custody()
     p, aid = store.path / str(n), store.namespace + ':' + str(n)
     raw = {name: read_optional(p / name) for name in ('registration.json', 'request.json', 'witness.json', 'events.jsonl')}
     journal = raw['events.jsonl'] or b''
@@ -258,12 +309,13 @@ def recover(store, n):
     if raw['registration.json']:
         try:
             registration = parse(raw['registration.json'])
-            if set(registration) != set('schema attempt_id expectation_sha256 request_sha256'.split()) or registration != dict(
+            if type(registration) is not dict or set(registration) != set('schema attempt_id expectation_sha256 request_sha256'.split()) or registration != dict(
                     schema='ns001.h2a2.registration.v1', attempt_id=aid,
                     expectation_sha256=H(C(store.e)), request_sha256=H(raw['request.json'] or b'')):
                 raise ValueError('registration')
-        except ValueError:
+        except (ValueError, TypeError, KeyError, RecursionError):
             invalid = raw['registration.json'].endswith(b'\n')
+            registration = None
     witness = None
     if raw['witness.json']:
         try:
@@ -663,6 +715,7 @@ def dispatch_bound(witness, event):
 
 def invoke(w, source):
     """Fixed dispatch only; never accepts an alternate callable or source path."""
+    w.attempt.require_writable()
     if receive is not RECEIVER or receive.__code__ is not RECEIVER_CODE:
         w.fail('WRONG_LOADER')
         return

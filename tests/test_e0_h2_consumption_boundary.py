@@ -71,6 +71,38 @@ def main():
     results = []
     positive = []
     retained = []
+    terminal_checks = []
+    custody_checks = []
+
+    def snapshot(directory):
+        return {p.relative_to(directory).as_posix(): p.read_bytes().hex()
+                for p in sorted(directory.rglob('*')) if p.is_file()}
+
+    def stopped(operation):
+        try:
+            operation()
+        except m.Stop as exc:
+            return str(exc)
+        raise AssertionError('operation did not stop')
+
+    def check_aborted(a):
+        before = snapshot(a.path)
+        calls = monitor.entries
+        # Test a fresh writer as well as the original live object. The fresh
+        # writer must consult the retained disposition, not a cached flag.
+        for writer_name, writer in (('original', a), ('fresh', m.Attempt(store, a.ordinal))):
+            for state in ('PREPARED', 'ATTEMPTED', 'ACCEPTED', 'REFUSED'):
+                message = stopped(lambda state=state: writer.event(state, witness={}, entered=False))
+                if writer_name == 'fresh':
+                    assert 'terminal' in message
+                terminal_checks.append(dict(attempt_id=a.id, writer=writer_name, operation=state, result='STOP'))
+            stopped(lambda: writer.register(m.C(m.request(e))))
+            w = m.Witness(writer, monitor)
+            stopped(lambda: m.invoke(w, b'abc'))
+            terminal_checks.extend([dict(attempt_id=a.id, writer=writer_name, operation=op, result='STOP')
+                                    for op in ('register', 'invoke')])
+        assert monitor.entries == calls, 'ABORTED receiver resumed'
+        assert snapshot(a.path) == before, 'ABORTED evidence changed'
 
     def acquisition(a):
         # Fresh exact frozen acquisition fixture, outside repository. No payload source import.
@@ -94,6 +126,8 @@ def main():
         record = dict(case=note, attempt_id=a.id, state=result['state'], code=result['primary_code'],
                       terminal_sha256=m.H(m.C(result)))
         results.append(record)
+        if result['state'] == 'ABORTED':
+            check_aborted(a)
         return result
 
     def run(case, expected, variant='', request_change=None):
@@ -263,6 +297,73 @@ def main():
             before = {p.name: p.read_bytes() for p in directory.iterdir()}
             store.recover(int(directory.name))
             assert before == {p.name: p.read_bytes() for p in directory.iterdir()}
+        # F2: new isolated malformed registrations; originals are not rewritten.
+        registration_cases = [
+            ('null', b'null\n', 'RECORD_INVALID'), ('number', b'1\n', 'RECORD_INVALID'),
+            ('boolean', b'true\n', 'RECORD_INVALID'), ('string', b'"wrong"\n', 'RECORD_INVALID'),
+            ('array', b'[]\n', 'RECORD_INVALID'), ('nested-array', b'[[1]]\n', 'RECORD_INVALID'),
+            ('object', b'{}\n', 'RECORD_INVALID'), ('syntax', b'{bad}\n', 'RECORD_INVALID'),
+            ('duplicate', b'{"schema":1,"schema":2}\n', 'RECORD_INVALID'),
+            ('unicode', b'\xff\n', 'RECORD_INVALID'),
+            ('torn', b'{"schema":', 'ATTEMPT_INCOMPLETE'),
+            ('empty', b'', 'ATTEMPT_INCOMPLETE'), ('missing', None, 'ATTEMPT_INCOMPLETE')]
+        for label, raw, expected_code in registration_cases:
+            a = store.reserve()
+            m.persist(a.path / 'request.json', m.C(m.request(e, 'N18')))
+            if raw is not None:
+                m.persist(a.path / 'registration.json', raw)
+            prior = snapshot(a.path)
+            result = store.recover(a.ordinal)
+            record(a, result, ('ABORTED', expected_code), 'F2-' + label)
+            assert store.recover(a.ordinal) == result
+            assert all(snapshot(a.path)[k] == v for k, v in prior.items())
+
+        # F1: damage only new custody fixtures. Keep before/after byte maps.
+        custody_cases = ('missing-store', 'missing-pin', 'missing-lock', 'malformed-store',
+                         'malformed-pin', 'conflicting-store', 'conflicting-pin', 'valid',
+                         'live-missing-store', 'live-missing-pin')
+        for label in custody_cases:
+            path = root / ('custody-' + label)
+            ns = h((args.namespace + ':' + label).encode('ascii'))
+            side = m.Store(path, ns, e)
+            side_attempt = side.reserve()
+            side_attempt.register(m.C(m.request(e)))
+            before = snapshot(path)
+            if not label.startswith('live-'):
+                side.close()
+            target = path / ('store.json' if label.endswith('store') else 'lock' if label.endswith('lock') else m.H(m.C(e)) + '.json')
+            if 'missing' in label:
+                target.unlink()
+            elif label == 'malformed-store' or label == 'malformed-pin':
+                target.write_bytes(b'null\n')
+            elif label == 'conflicting-store':
+                target.write_bytes(m.C(dict(schema='ns001.h2a2.store.v1', namespace='0' * 64)))
+            elif label == 'conflicting-pin':
+                altered = dict(e, input_sha256='0' * 64)
+                target.write_bytes(m.C(altered))
+            damaged = snapshot(path)
+            if label == 'valid':
+                reopened = m.Store(path, ns, e)
+                reopened.close()
+                assert snapshot(path) == before
+                outcomes = ['UNCHANGED']
+            elif label.startswith('live-'):
+                outcomes = [stopped(side.reserve), stopped(lambda: side.recover(side_attempt.ordinal)),
+                            stopped(lambda: side_attempt.event('PREPARED', entered=False))]
+                side.close()
+            else:
+                outcomes = [stopped(lambda: m.Store(path, ns, e))]
+            assert snapshot(path) == damaged, 'custody metadata silently repaired'
+            custody_checks.append(dict(case=label, result='UNCHANGED' if label == 'valid' else 'STOP',
+                                       outcomes=outcomes))
+            m.persist(root / ('custody-' + label + '-observations.json'),
+                      m.C(dict(before=before, damaged=damaged, after=snapshot(path))))
+        empty = root / 'custody-existing-empty'
+        empty.mkdir()
+        stopped(lambda: m.Store(empty, h((args.namespace + ':empty').encode()), e))
+        assert not list(empty.iterdir())
+        custody_checks.append(dict(case='existing-empty', result='STOP', outcomes=['no files recreated']))
+
         # Serialized data round trip uses actual files; no fabricated observed records.
         total = 0
         for directory in store.path.iterdir():
@@ -273,8 +374,15 @@ def main():
                     continue
                 for line in path.read_bytes().splitlines(keepends=True):
                     if line.endswith(b'\n'):
-                        assert m.C(m.parse(line)) == line
-                        total += 1
+                        try:
+                            parsed = m.parse(line)
+                        except (ValueError, UnicodeError):
+                            # F2 deliberately retains invalid raw JSON. It is
+                            # classified and hashed by recovery, not normalized.
+                            assert path.name == 'registration.json'
+                        else:
+                            assert m.C(parsed) == line
+                            total += 1
         x, y = positive[0][1], positive[1][1]
         def semantic(w):
             w = json.loads(json.dumps(w))
@@ -287,10 +395,12 @@ def main():
         assert positive[0][0].id != positive[1][0].id
         assert m.C(positive[0][2]) != m.C(positive[1][2])
         summary = dict(schema='ns001.h2a2.consumption-acceptance.v1', cases=results,
-                       positive_count=2, refusal_count=sum(x['state'] == 'REFUSED' for x in results),
+                       positive_count=sum(x['state'] == 'ACCEPTED' for x in results),
+                       refusal_count=sum(x['state'] == 'REFUSED' for x in results),
                        recovery_count=sum(x['state'] == 'ABORTED' for x in results),
                        roundtrip_records=total, semantic_repeat_equal=True,
                        implementation_sha256=args.implementation_sha256, harness_sha256=args.harness_sha256)
+        summary.update(custody_checks=custody_checks, terminal_checks=terminal_checks)
         m.persist(root / 'acceptance.json', m.C(summary))
         print(m.C(summary).decode(), end='')
     finally:
