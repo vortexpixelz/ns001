@@ -21,7 +21,7 @@ class Chunk:
 
 class Transcript:
     """Chunked channels with byte offsets, strict token association and stop epochs."""
-    def __init__(self, chunks):
+    def __init__(self, chunks, expected_stops=None):
         self.chunks = tuple(chunks)
         self.parser = MIParser()
         self.raw = dict.fromkeys(('commands', 'stdout', 'stderr'), b'')
@@ -33,6 +33,8 @@ class Transcript:
         self.execution_token = None
         self.execution_running = False
         self.groups, self.threads = {}, {}
+        self.seen_groups, self.seen_threads = set(), set()
+        self.terminal_exit = False
         buffers = {'stdout': b'', 'stderr': b''}
         for index, chunk in enumerate(self.chunks):
             if chunk.channel not in self.raw or type(chunk.raw) is not bytes or not chunk.raw:
@@ -43,6 +45,8 @@ class Transcript:
             self.raw[chunk.channel] += chunk.raw
             self.order.append(dict(index=index, channel=chunk.channel, offset=offset, length=len(chunk.raw)))
             if chunk.channel == 'commands':
+                if self.terminal_exit:
+                    raise Invalid('command after terminal death')
                 if buffers['stdout'] or buffers['stderr']:
                     raise Invalid('command amid incomplete output')
                 self.parser.command(chunk.raw)
@@ -85,6 +89,10 @@ class Transcript:
                         raise Invalid('unexpected software breakpoint evidence')
                     self.results[rec.token] = rec
                     cmd = self.commands[rec.token]
+                    if 'bkpt' in rec.fields and not cmd.startswith('-break-insert -h *'):
+                        raise Invalid('unassociated hardware insertion result')
+                    if cmd.startswith('-break-delete ') and rec.fields:
+                        raise Invalid('ambiguous hardware retirement result')
                     if cmd.startswith('-exec-'):
                         if rec.kind != '^running':
                             raise Invalid('execution command did not run')
@@ -97,6 +105,8 @@ class Transcript:
                                 bkpt.get('enabled') != b'y' or _hex(bkpt.get('addr')) != int(cmd.split('*')[1], 16) or
                                 any(k in bkpt for k in ('pending', 'cond', 'ignore', 'commands', 'locations'))):
                             raise Invalid('hardware site/software fallback evidence')
+                    if cmd.startswith('-data-read-memory-bytes ') and self.active_stop is None:
+                        raise Invalid('memory read without stopped custody')
                     if self.active_stop is not None:
                         self._read_response(cmd, rec)
                 elif rec.kind == '*running':
@@ -117,21 +127,40 @@ class Transcript:
                     execution = self.execution_token
                     self.stops.append((index, execution, rec))
                     self.active_stop = len(self.stops) - 1
-                    self.stop_data[self.active_stop] = {'registers': None, 'names': None, 'reads': []}
+                    self.stop_data[self.active_stop] = {'registers': None, 'names': None, 'reads': [],
+                        'groups': dict(self.groups), 'threads': dict(self.threads)}
                     self.execution_token = None
                 elif rec.kind == '=thread-group-started':
                     group = rec.fields['id']
-                    if group in self.groups or self.groups:
+                    if group in self.seen_groups or self.groups or self.terminal_exit:
                         raise Invalid('duplicate/multiple inferior')
                     self.groups[group] = _decimal(rec.fields['pid'])
+                    self.seen_groups.add(group)
                 elif rec.kind == '=thread-created':
                     tid, group = _decimal(rec.fields['id']), rec.fields['group-id']
-                    if tid in self.threads or self.threads or group not in self.groups:
+                    if tid in self.seen_threads or self.threads or group not in self.groups or self.terminal_exit:
                         raise Invalid('duplicate/multiple/unbound thread')
                     self.threads[tid] = group
+                    self.seen_threads.add(tid)
                 elif rec.kind in ('=thread-group-exited', '=thread-exited'):
-                    if not self.stops or self.parser.pending is not None:
-                        raise Invalid('premature process exit')
+                    if rec.kind == '=thread-exited':
+                        tid, group = _decimal(rec.fields['id']), rec.fields['group-id']
+                        if self.threads.get(tid) != group:
+                            raise Invalid('exit of unowned thread')
+                        del self.threads[tid]
+                    else:
+                        group = rec.fields['id']
+                        if group not in self.groups:
+                            raise Invalid('exit of unowned process')
+                        del self.groups[group]
+                        self.threads = {t: g for t, g in self.threads.items() if g != group}
+                    if (expected_stops is None or len(self.stops) != expected_stops or
+                            self.parser.pending is not None or self.execution_token is not None or
+                            self.active_stop is None or
+                            self.stop_data[self.active_stop]['registers'] is None or
+                            not self.stop_data[self.active_stop]['reads']):
+                        raise Invalid('premature process/thread exit')
+                    self.terminal_exit = True
                 elif rec.kind == 'prompt':
                     pass
                 else:
@@ -144,6 +173,8 @@ class Transcript:
 
     def _read_response(self, cmd, rec):
         data = self.stop_data[self.active_stop]
+        if self.groups != data['groups'] or self.threads != data['threads']:
+            raise Invalid('capture after custody loss')
         if cmd == '-data-list-register-names':
             if set(rec.fields) != {'register-names'}:
                 raise Invalid('unexpected register result fields')
@@ -274,7 +305,7 @@ class Transcript:
             pc = _hex(rec.fields['frame']['addr'])
             tid = _decimal(rec.fields['thread-id'])
             if (pc != regs['rip'] or tid != custody['tid'] or rec.fields.get('stopped-threads') != b'all' or
-                    self.groups.get(self.threads.get(tid)) != custody['pid']):
+                    data['groups'].get(data['threads'].get(tid)) != custody['pid']):
                 raise Invalid('stop snapshot association')
             if ('signal-name' in rec.fields and rec.fields['signal-name'] != b'SIGTRAP' or
                     'signal-meaning' in rec.fields or any(k in rec.fields for k in ('exit-code', 'core'))):
@@ -539,7 +570,7 @@ def decode_observation(p, observation, x, e, attempted):
     faults = []
     if dispatch['attempted_sha256'] != attempted or dispatch['frame_count'] != 1 or dispatch['gate'] != 'released-once-after-fsync':
         faults.append('OBSERVATION_MISSING')
-    transcript = Transcript(observation.transcript)
+    transcript = Transcript(observation.transcript, expected_stops=2)
     if transcript.raw['stderr'] != bytes.fromhex(p.q1['stderr']) or any(transcript.streams.values()):
         raise Invalid('unexpected observer policy/debug diagnostic')
     if len(transcript.stops) != 2:
@@ -566,6 +597,7 @@ def decode_observation(p, observation, x, e, attempted):
             for m, epoch in zip(observation.maps, ('caller', 'receiver'))):
         faults.append('ENGINE_UNQUALIFIED')
     validate_text(p, observation.text_captures, ('caller', 'receiver'))
+    reconcile_mi_text(transcript, observation.text_captures, ('caller', 'receiver'))
     for stop in (caller, receiver):
         code = Snapshot(stop.reads)
         if code.read(ENGINE['caller'], 2) != bytes.fromhex(ENGINE['caller_hex']) or code.read(ENGINE['receiver'], 4) != bytes.fromhex(ENGINE['receiver_hex']):
@@ -578,6 +610,7 @@ def decode_observation(p, observation, x, e, attempted):
     settings = setup.readbacks(p.q1)
     references = parse(p.artifacts['qualification'])
     setup_facts = validate_setup(p, setup, references)
+    hardware_facts = validate_hardware_history(setup, transcript, references)
     controls = validate_controls(p)
     facts = {
         'before_inferior': not any(i <= setup_facts['policy_end'] and r.kind in
@@ -598,10 +631,11 @@ def decode_observation(p, observation, x, e, attempted):
         'ptrace_syscall_events': setup_facts['syscalls'] == (1, 1),
         'in_place_single_call_step': transcript.commands[receiver.token] == '-exec-step-instruction'
             and receiver.registers['rsp'] == caller.registers['rsp'] - 8,
-        'receiver_stays_armed': setup_facts['monitor_armed'] and len(p.admission['controls']) == 2 and p.admission['step']['receiver_slot'] == 'armed',
+        'receiver_stays_armed': hardware_facts['monitor_armed'],
         'raw_unmasked_text_equal': validate_text(p, observation.text_captures, ('caller', 'receiver')),
         'complete_text_ranges': validate_text(p, p.text_captures, ('launcher', 'post-exec', 'ready')),
-        'two_effective_slots': controls['slots'] == [0, 1],
+        'two_effective_slots': controls['slots'] == [0, 1] and
+            hardware_facts['active_count'] == 2,
         'kernel_programming_witnessed': controls['writes'] == [0, 1],
         'blocked_gate_restop': controls['restop'] and setup_facts['ready'] and dispatch['gate'] == 'released-once-after-fsync',
         'death_chain_qualified': p.admission['death'] == ['controller-loss-kills-gdb', 'gdb-loss-kills-child', 'parent-checks-match'],
@@ -639,7 +673,7 @@ def measured_witness(p, cap, x, e, attempted, faults, precondition=False):
         add('callable', dict(object_match='WRONG_COMPILE_CALLABLE' not in faults,
             native_target_match='WRONG_COMPILE_CALLABLE' not in faults, binding_match='WRONG_COMPILE_CALLABLE' not in faults))
         add('observer', dict(artifact_match='OBSERVER_UNQUALIFIED' not in faults, attachment_match='OBSERVER_UNQUALIFIED' not in faults,
-            qualified='OBSERVER_UNQUALIFIED' not in faults, sentinel_active=True, armed='OBSERVER_NOT_ARMED' not in faults))
+            qualified='OBSERVER_UNQUALIFIED' not in faults, sentinel_active=cap.q1_facts['receiver_stays_armed'], armed='OBSERVER_NOT_ARMED' not in faults))
         add('dispatch', dict(attempted_event_sha256=attempted, persisted='OBSERVATION_MISSING' not in faults))
         params, raw, exact, length = None, None, False, None
         d = Decoder(Snapshot(cap.receiver.reads))
@@ -909,8 +943,8 @@ def finish_observation(attempt, p, observation, e, attempted, supplied_witness=N
     from .real_receipt_evidence import retain, forensic_bytes, validate, witness_codes
     if observation is None:
         raise Invalid('raw observation required')
-    # Retain known guard faults before any interrupted decode can erase them.
-    known = supported_guard_faults(p, observation)
+    # Retain independent supported faults before any later decode can erase them.
+    known = supported_predecode_faults(p, observation, attempt.x, e, attempted)
     if (forensic_bytes(attempt._preparation_input) != attempt._preparation_bytes or
             forensic_bytes(p) != attempt._preparation_bytes):
         known += supported_guard_faults(attempt._preparation_input, None) + ['RECORD_INVALID']
@@ -1080,6 +1114,8 @@ def validate_text(p, captures, epochs):
         if (any(type(m[k]) is not int or m[k] < 0 for k in ('start', 'end', 'file_offset', 'device', 'inode', 'load_bias', 'pid', 'tid')) or
                 m['source'] != 'independent-supervisor-unmasked-read' or not m['inode'] or not m['handle'] or
                 m['pid'] != p.custody['pid'] or m['tid'] != p.custody['tid'] or
+                not 0 < m['start'] < m['end'] <= 2**64 or
+                m['file_offset'] + ref['length'] > 2**64 or
                 m['start'] != ref['address'] or m['end'] != m['start'] + ref['length'] or
                 m['file_offset'] != ref['file_offset'] or m['image_sha256'] != ref['image_sha256'] or
                 m['load_bias'] != ref['load_bias'] or
@@ -1140,6 +1176,132 @@ def supported_guard_faults(p, observation):
     return ranked(faults)
 
 
+def supported_predecode_faults(p, observation, x, e, attempted):
+    """Persist independent observed facts before the MI parser can fail."""
+    faults = supported_guard_faults(p, observation)
+    if type(p) is Preparation and type(observation) is Observation:
+        if observation.protected_final != p.protected:
+            faults.append('OBJECT_SUBSTITUTION')
+        if type(observation.dispatch) is dict:
+            d = observation.dispatch
+            if all(k in d for k in ('attempt_id', 'expectation_sha256')) and (
+                    d['attempt_id'] != x or d['expectation_sha256'] != digest(canonical(e))):
+                faults.append('RECORD_INVALID')
+            if all(k in d for k in ('attempted_sha256', 'frame_count', 'gate')) and (
+                    d['attempted_sha256'] != attempted or d['frame_count'] != 1 or d['gate'] != 'released-once-after-fsync'):
+                faults.append('OBSERVATION_MISSING')
+        if type(observation.a_capture) is bytes and observation.a_capture != p.a_capture:
+            faults.append('OBSERVATION_MISSING')
+        try:
+            if type(observation.maps) is tuple and type(observation.text_captures) is tuple:
+                if len(observation.maps) != 2 or any(m != text_maps(observation.text_captures, epoch)
+                        for m, epoch in zip(observation.maps, ('caller', 'receiver'))):
+                    faults.append('ENGINE_UNQUALIFIED')
+        except (Invalid, AttributeError, TypeError, ValueError):
+            # Malformed ancillary data supplies no association fact; it must not
+            # prevent already supported guard/object faults from being persisted.
+            pass
+    return ranked(faults)
+
+
+def reconcile_mi_text(transcript, captures, epochs):
+    """Compare every actual addressed MI text intersection to retained binary bytes.
+
+    Object reads outside executable mappings remain object evidence. No absent MI
+    byte is supplied from a reference. Snapshot also rejects ambiguous overlaps.
+    """
+    for index, data in transcript.stop_data.items():
+        epoch = epochs[index]
+        for read in data['reads']:
+            Snapshot.range(read.address, read.requested)
+            for capture in captures:
+                if capture.epoch != epoch or capture.role != 'executable':
+                    continue
+                start, end = capture.mapping['start'], capture.mapping['end']
+                if not 0 < start < end <= 2**64:
+                    raise Invalid('text range overflow')
+                lo, hi = max(start, read.address), min(end, read.address + read.requested)
+                if lo < hi and read.data[lo-read.address:hi-read.address] != capture.raw[lo-start:hi-start]:
+                    raise Invalid('MI/supervisor text disagreement')
+    return True
+
+
+def validate_hardware_history(setup, observation, references):
+    """Replay successful retained control results across setup and receipt phases.
+
+    Temporary sites follow the frozen sequential phases, including the return
+    site spanning syscall stops. Receiver retirement is never reversible.
+    """
+    active, used = {}, set()
+    receiver_id = None
+    count = 0
+    path = references['setup_path']
+    # The return site spans the entry/exit syscall catchpoints. READY is a
+    # blocked-gate restop; its caller site is installed only after that capture.
+    temporary = (0x4f6102, 0x4f6224, 0x4f6224, 0x4f6224, 0x4f6274, 0x4f6299, None)
+    for transcript, observing in ((setup, False), (observation, True)):
+        if transcript is None:
+            continue
+        for _, _, rec in transcript.record_order:
+            if rec.kind.startswith('^'):
+                cmd = transcript.commands[rec.token]
+                if cmd.startswith('-break-insert -h *'):
+                    bkpt = rec.fields['bkpt']
+                    number, address = _decimal(bkpt['number']), _hex(bkpt['addr'])
+                    if not number or number in used or address in active.values():
+                        raise Invalid('duplicate/reused hardware identity/site')
+                    if observing:
+                        raise Invalid('hardware insertion after READY')
+                    if address == ENGINE['receiver']:
+                        if receiver_id is not None or count:
+                            raise Invalid('late/replaced receiver monitor')
+                        receiver_id = number
+                    elif address == ENGINE['caller']:
+                        if count != len(path) or len(active) != 1:
+                            raise Invalid('caller before derivation retirement')
+                    elif count >= len(temporary) or address != temporary[count]:
+                        raise Invalid('hardware site outside frozen derivation phase')
+                    active[number] = address
+                    used.add(number)
+                    if len(active) > 2:
+                        raise Invalid('hardware slot budget')
+                elif cmd.startswith('-break-delete '):
+                    number = int(cmd.split()[1])
+                    if number not in active or number == receiver_id or observing:
+                        raise Invalid('receipt monitor/unknown hardware retirement')
+                    del active[number]
+                elif cmd == '-break-list':
+                    table = rec.fields.get('BreakpointTable', {})
+                    body = table.get('body')
+                    if type(body) is not list:
+                        raise Invalid('missing hardware inventory')
+                    measured = {}
+                    for entry in body:
+                        b = entry.get('bkpt', entry)
+                        if b.get('type') != b'hw breakpoint' or b.get('enabled') != b'y':
+                            raise Invalid('unexpected inventory site')
+                        n = _decimal(b.get('number'))
+                        if n in measured:
+                            raise Invalid('duplicate inventory')
+                        measured[n] = _hex(b.get('addr'))
+                    if measured != active:
+                        raise Invalid('hardware inventory disagreement')
+                elif cmd.startswith('-exec-'):
+                    if not observing and count >= len(path):
+                        raise Invalid('execution beyond frozen setup path')
+                    if receiver_id not in active:
+                        raise Invalid('unarmed receiver during execution')
+                    permitted = ({ENGINE['receiver'], ENGINE['caller']} if observing else
+                        {ENGINE['receiver']} | ({temporary[count]} if temporary[count] is not None else set()))
+                    if set(active.values()) != permitted:
+                        raise Invalid('incomplete/unretired phase hardware inventory')
+            elif rec.kind == '*stopped' and not observing:
+                count += 1
+        if set(active.values()) != {ENGINE['receiver'], ENGINE['caller']}:
+            raise Invalid('READY/receipt hardware inventory')
+    return dict(monitor_armed=receiver_id in active, active_count=len(active))
+
+
 def validate_setup(p, transcript, references):
     """Reconcile every setup stop with the independently frozen native path.
 
@@ -1147,6 +1309,8 @@ def validate_setup(p, transcript, references):
     the caller's Derivation descriptor cannot supply missing measurements.
     """
     path = references['setup_path']
+    hardware = validate_hardware_history(transcript, None, references)
+    reconcile_mi_text(transcript, p.text_captures, ('post-exec',) * 6 + ('ready',))
     if len(path) != 7 or len(transcript.stops) != len(path) or len(p.native_derivation) != len(path):
         raise Invalid('incomplete/unexpected setup stop history')
     if transcript.groups != {b'i1': p.custody['pid']} or transcript.threads != {p.custody['tid']: b'i1'}:
@@ -1209,7 +1373,7 @@ def validate_setup(p, transcript, references):
         token = next(t for t, cmd in transcript.commands.items() if cmd == '-interpreter-exec console ' + json.dumps(show))
         form = p.q1['outputs'][show]
         values[show] = transcript.streams[token][len(bytes.fromhex(form['prefix'])):-len(bytes.fromhex(form['suffix']))]
-    return dict(policy_end=policy_end, readback_values=values, ready=pcs[-1] == p.ready.registers['rip'], monitor_armed=monitor.get('enabled') == b'y',
+    return dict(policy_end=policy_end, readback_values=values, ready=pcs[-1] == p.ready.registers['rip'], monitor_armed=hardware['monitor_armed'],
         receiver_hits=sum(pc == ENGINE['receiver'] for pc in pcs), syscalls=(measured.syscall_entries, measured.syscall_exits))
 
 

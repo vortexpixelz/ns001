@@ -121,7 +121,22 @@ def preparation(x):
         (ready.registers, ready.reads),
     ]
     token = 31
-    for binding, (regs, reads) in zip(setup_path, measurements):
+    temporary = None
+    number = 2
+    targets = (0x4f6102, 0x4f6224, 0x4f6224, 0x4f6224, 0x4f6274, 0x4f6299, None)
+    for index, (binding, (regs, reads)) in enumerate(zip(setup_path, measurements)):
+        target = targets[index]
+        if target != temporary:
+            if temporary is not None:
+                transcript += [Chunk('commands', mi_command(token, f'-break-delete {number}')),
+                    Chunk('stdout', f'{token}^done\n'.encode())]
+                token += 1
+            if target is not None:
+                number += 1
+                transcript += [Chunk('commands', mi_command(token, f'-break-insert -h *0x{target:x}')),
+                    Chunk('stdout', (f'{token}^done,bkpt={{number="{number}",type="hw breakpoint",enabled="y",addr="0x{target:x}"}}\n').encode())]
+                token += 1
+            temporary = target
         raw_stops.append(dict(token=token, pid=401, tid=401, pc=regs['rip'], signal='SIGTRAP',
             mechanism=binding['mechanism'], trap=binding['trap'], registers=regs,
             reads=[dict(address=r.address, requested=r.requested, hex=r.data.hex()) for r in reads],
