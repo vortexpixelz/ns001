@@ -602,17 +602,23 @@ class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.tmp.name) / 'store', NS, create=True)
-        self.e = expectation()
+        from real_receipt_fixtures import preparation, freeze
+        self.e, self.prep = preparation(X)
+        freeze(self.store, self.e, self.prep)
         self.a = self.store.reserve(self.e, request(self.e))
 
     def tearDown(self):
         self.store.close()
         self.tmp.cleanup()
 
+    def observation(self, tried):
+        from real_receipt_fixtures import observation
+        return observation(self.prep, X, self.e, tried)
+
     def finish_positive(self):
-        self.a.prepare()
+        self.a.prepare(self.prep)
         tried = self.a.attempted()
-        self.a.finish(witness(X, self.e, tried), capture(attempted=tried))
+        self.a.finish(witness(X, self.e, tried), self.observation(tried))
 
     def test_positive_durable_chain(self):
         self.finish_positive()
@@ -622,7 +628,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.a.raw('events.jsonl'), before)
 
     def test_witness_alone_no_accept(self):
-        self.a.prepare()
+        self.a.prepare(self.prep)
         tried = self.a.attempted()
         with self.assertRaises(Invalid):
             self.a.finish(witness(X, self.e, tried), None)
@@ -633,21 +639,21 @@ class LifecycleTests(unittest.TestCase):
             self.a.attempted()
 
     def test_aborted_terminality_and_idempotence(self):
-        self.a.prepare()
+        self.a.prepare(self.prep)
         self.a.attempted()
         v = self.a.recover()
         self.assertEqual(v['state'], 'ABORTED')
         self.assertEqual(v, self.a.recover())
         with self.assertRaises(Invalid):
-            self.a.prepare()
+            self.a.prepare(self.prep)
 
     def test_observer_loss_aborts(self):
-        self.a.prepare()
+        self.a.prepare(self.prep)
         tried = self.a.attempted()
-        self.assertEqual(self.a.finish(witness(X, self.e, tried), replace(capture(attempted=tried), interruption=True))['state'], 'ABORTED')
+        self.assertEqual(self.a.finish(witness(X, self.e, tried), replace(self.observation(tried), interrupted=True))['state'], 'ABORTED')
 
     def test_torn_tail_retained(self):
-        self.a.prepare()
+        self.a.prepare(self.prep)
         raw = self.a.raw('events.jsonl') + b'{"schema"'
         (self.a.path / 'events.jsonl').write_bytes(raw)
         r = self.a.recover()
@@ -682,12 +688,12 @@ class LifecycleTests(unittest.TestCase):
     def test_stale_writer(self):
         self.store.close()
         with self.assertRaises(Invalid):
-            self.a.prepare()
+            self.a.prepare(self.prep)
 
     def test_missing_custody_never_recreated(self):
         (self.store.root / 'custody').unlink()
         with self.assertRaises(Invalid):
-            self.a.prepare()
+            self.a.prepare(self.prep)
         self.assertFalse((self.store.root / 'custody').exists())
 
     def test_exclusive_store(self):
@@ -707,10 +713,10 @@ class LifecycleTests(unittest.TestCase):
     def test_custody_replacement(self):
         (self.store.root / 'custody').write_bytes(canonical({'namespace': 'b' * 64, 'kind': 'exclusive-controller'}))
         with self.assertRaises(Invalid):
-            self.a.prepare()
+            self.a.prepare(self.prep)
 
     def test_fsync_failure_no_attempted_release(self):
-        self.a.prepare()
+        self.a.prepare(self.prep)
         with patch('e0.h2.real_receipt_evidence.os.fsync', side_effect=OSError('synthetic fsync failure')):
             with self.assertRaises(OSError):
                 self.a.attempted()

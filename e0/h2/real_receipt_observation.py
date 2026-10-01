@@ -137,14 +137,18 @@ class _Grammar:
             self.i += 1
             return {} if c == '{' else []
         is_result = self.s[self.i:self.i + 1] not in ('"', '{', '[')
-        result = {} if is_result else []
+        result = {} if is_result and c == '{' else []
         while True:
             if is_result:
                 key = self.identifier()
-                if key in result or self.s[self.i:self.i + 1] != '=':
+                if (type(result) is dict and key in result) or self.s[self.i:self.i + 1] != '=':
                     raise Invalid('MI duplicate/result')
                 self.i += 1
-                result[key] = self.value(depth + 1)
+                value = self.value(depth + 1)
+                if type(result) is dict:
+                    result[key] = value
+                else:
+                    result.append({key: value})  # MI result lists preserve repeated names/order.
             else:
                 result.append(self.value(depth + 1))
             c = self.s[self.i:self.i + 1]

@@ -158,7 +158,10 @@ def witness_codes(w, x, e, attempted):
     obs = w['observations']
     nonguards = [o for o in obs if o['kind'] != 'guard']
     order = [o['kind'] for o in nonguards]
-    if order != ['protected', 'derived', 'engine', 'callable', 'observer', 'dispatch', 'entry', 'protected', 'completion', 'end']:
+    positive_order = ['protected', 'derived', 'engine', 'callable', 'observer', 'dispatch', 'entry', 'protected', 'completion', 'end']
+    precondition = attempted is None and bool(w['violations'])
+    if (not precondition and order != positive_order or
+            precondition and order != positive_order[:len(order)]):
         faults.append('OBSERVATION_MISSING')
     for o in obs:
         kind, d = o['kind'], o['data']
@@ -333,9 +336,40 @@ class Store:
         if not valid:
             raise Invalid('lost custody')
 
-    def reserve(self, e, request_raw):
+    def freeze(self, e, material):
+        """Retain frozen comparison bytes before any reservation/registration."""
         self.check()
         validate(e, 'expectation')
+        expected = {e[k] for k in ('spec_sha256', 'bootstrap_sha256', 'observer_sha256', 'qualification_sha256')}
+        expected |= {e['engine'][k] for k in ('build_sha256', 'interface_sha256')}
+        expected |= {image['origin_sha256'] for image in e['engine']['images']}
+        if not expected <= set(material):
+            raise Invalid('missing frozen qualification material')
+        q = self.root / 'qualification'
+        if not q.exists():
+            q.mkdir(mode=0o700)
+            synchronize_dir(self.root)
+        for h, raw in sorted(material.items()):
+            hash_value(h)
+            if digest(raw) != h or not raw:
+                raise Invalid('artifact pin mismatch')
+            path = q / h
+            if path.exists():
+                if path.is_symlink() or path.read_bytes() != raw:
+                    raise Invalid('frozen artifact conflict')
+            else:
+                retain(path, raw)
+
+    def reserve_only(self, e):
+        self.check()
+        validate(e, 'expectation')
+        pins = {e[k] for k in ('spec_sha256', 'bootstrap_sha256', 'observer_sha256', 'qualification_sha256')}
+        pins |= {e['engine'][k] for k in ('build_sha256', 'interface_sha256')}
+        pins |= {image['origin_sha256'] for image in e['engine']['images']}
+        for h in pins:
+            path = self.root / 'qualification' / h
+            if path.is_symlink() or not path.is_file() or digest(path.read_bytes()) != h:
+                raise Invalid('qualification must precede reservation')
         names = [p.name for p in (self.root / 'reservations').iterdir()]
         if any(not s.isdecimal() or int(s) < 1 or str(int(s)) != s for s in names):
             raise Invalid('reservation custody')
@@ -373,14 +407,12 @@ class Store:
         except BaseException:
             self.failed = True
             raise
-        p = self.root / str(n)
-        p.mkdir(mode=0o700)
-        synchronize_dir(self.root)
-        retain(p / 'request.json', request_raw)
-        reg = dict(schema=SCHEMA + 'registration.v1', attempt_id=x,
-                   expectation_sha256=digest(eraw), request_sha256=digest(request_raw))
-        retain(p / 'registration.json', canonical(reg))
         return Attempt(self, n)
+
+    def reserve(self, e, request_raw):
+        attempt = self.reserve_only(e)
+        attempt.register(request_raw)
+        return attempt
 
 
 class Attempt:
@@ -390,6 +422,29 @@ class Attempt:
         self.store = store
         self.path = store.root / str(ordinal)
         self.x = f'{store.namespace}:{ordinal}'
+        self._preparation = None
+        self._validated_terminal = None
+        self._attempted_hash = None
+        self._packaging_authority = None
+
+    def reservation(self):
+        raw = (self.store.root / 'reservations' / self.path.name).read_bytes()
+        if parse(raw) != {'attempt_id': self.x}:
+            raise Invalid('reservation conflict')
+        return raw
+
+    def register(self, raw):
+        self.store.check()
+        self.reservation()
+        if self.raw('recovery.json') is not None:
+            raise Invalid('reserved attempt already terminal')
+        if not self.path.exists():
+            self.path.mkdir(mode=0o700)
+            synchronize_dir(self.store.root)
+        e_raw = (self.store.root / 'expectation.json').read_bytes()
+        retain(self.path / 'request.json', raw)
+        retain(self.path / 'registration.json', canonical(dict(schema=SCHEMA + 'registration.v1',
+            attempt_id=self.x, expectation_sha256=digest(e_raw), request_sha256=digest(raw))))
 
     def raw(self, name):
         p = self.path / name
@@ -406,6 +461,7 @@ class Attempt:
 
     def active(self):
         self.store.check()
+        self.reservation()
         regraw, reqraw = self.raw('registration.json'), self.raw('request.json')
         if regraw is None or reqraw is None:
             raise Invalid('registration custody missing')
@@ -427,6 +483,10 @@ class Attempt:
             ('ACCEPTED', 'REFUSED') if states == ['PREPARED', 'ATTEMPTED'] else ())
         if state not in allowed:
             raise Invalid('transition')
+        if state in ('PREPARED', 'ATTEMPTED') and self._preparation is None:
+            raise Invalid('validated admission required')
+        if state in ('ACCEPTED', 'REFUSED') and self._validated_terminal != witness:
+            raise Invalid('validated observation required')
         faults = ranked(faults)
         if state in ('ACCEPTED', 'REFUSED'):
             wraw = self.raw('witness.json')
@@ -454,56 +514,97 @@ class Attempt:
                 f.flush()
                 os.fsync(f.fileno())
             synchronize_dir(self.path)
+            synchronize_dir(self.store.root)
             if self.events()[-1] != v:
                 raise Invalid('journal durable readback')
         except BaseException:
             self.store.failed = True
             raise
+        if state in ('ACCEPTED', 'REFUSED'):
+            self._packaging_authority = digest(raw)
         return digest(raw)
 
-    def prepare(self):
+    def prepare(self, preparation=None):
         self.active()
+        from .real_receipt_integration import (preparation_codes, measured_witness, retain_preparation,
+                                              _capture_manifest, _package)
+        e = validate(parse((self.store.root / 'expectation.json').read_bytes()), 'expectation')
+        faults = []
         try:
             r = validate(parse(self.raw('request.json')), 'request')
-        except (ValueError, TypeError, KeyError) as exc:
-            raise Invalid('EXPECTATION_INVALID') from exc
-        if r['expectation_sha256'] != digest((self.store.root / 'expectation.json').read_bytes()):
-            raise Invalid('EXPECTATION_INVALID')
-        if r['profile'] != PROFILE:
-            raise Invalid('PROFILE_UNQUALIFIED')
-        if r['source_channel'] != 'protected_bytes' or r['source_environment'] or r['cwd_policy'] != 'exclusive-synthetic':
-            raise Invalid('SOURCE_REDIRECTION')
-        if not parameters_match(r['parameters']):
-            raise Invalid('WRONG_ENTRYPOINT')
+            if r['expectation_sha256'] != digest(canonical(e)):
+                faults = ['EXPECTATION_INVALID']
+            elif r['profile'] != PROFILE:
+                faults = ['PROFILE_UNQUALIFIED']
+            elif r['source_channel'] != 'protected_bytes' or r['source_environment'] or r['cwd_policy'] != 'exclusive-synthetic':
+                faults = ['SOURCE_REDIRECTION']
+            elif not parameters_match(r['parameters']):
+                faults = ['WRONG_ENTRYPOINT']
+        except (ValueError, TypeError, KeyError):
+            faults = ['EXPECTATION_INVALID']
+        if not faults:
+            faults = preparation_codes(preparation, self.x, e, self.store.namespace)
+        retain_preparation(self, preparation)
+        if faults:
+            w = measured_witness(preparation, None, self.x, e, None, faults, precondition=True)
+            validate(w, 'witness')
+            _capture_manifest(self)
+            retain(self.path / 'witness.json', canonical(w))
+            self._validated_terminal = digest(canonical(w))
+            terminal = self.event('REFUSED', faults, False, self._validated_terminal)
+            _package(self)
+            return terminal
+        self._preparation = preparation
         return self.event('PREPARED', entered=False)
 
     def attempted(self):
-        return self.event('ATTEMPTED')
+        from .real_receipt_integration import preparation_codes
+        e = validate(parse((self.store.root / 'expectation.json').read_bytes()), 'expectation')
+        if preparation_codes(self._preparation, self.x, e, self.store.namespace):
+            raise Invalid('admission changed')
+        self._attempted_hash = self.event('ATTEMPTED')
+        return self._attempted_hash
 
     def finish(self, witness, capture):
-        """Offline validator completion; witness assertions alone cannot ACCEPT."""
-        from .real_receipt_observation import evaluate_capture
+        """Integrate raw transcript and measurements; never backfill ATTEMPTED."""
+        from .real_receipt_integration import finish_observation
         events = self.active()
         e = validate(parse((self.store.root / 'expectation.json').read_bytes()), 'expectation')
         attempted = digest(canonical(events[-1])) if events and events[-1]['state'] == 'ATTEMPTED' else None
-        if capture is None:
-            raise Invalid('raw capture required')
-        decision, supporting_faults = evaluate_capture(capture, self.x, digest(canonical(e)), attempted)
-        if decision == 'ABORT':
-            return self.recover()
-        faults = ranked(witness_codes(witness, self.x, e, attempted) + supporting_faults)
-        validate(witness, 'witness')
-        retain(self.path / 'capture.json', forensic_bytes(capture))
-        retain(self.path / 'witness.json', canonical(witness))
-        entered = True if any(o['kind'] == 'entry' and o['data']['native_entry'] for o in witness['observations']) else None
-        return self.event('REFUSED' if faults else 'ACCEPTED', faults, entered, digest(canonical(witness)))
+        if attempted is None or attempted != self._attempted_hash or self._preparation is None:
+            raise Invalid('no live durable dispatch authority')
+        return finish_observation(self, self._preparation, capture, e, attempted, witness)
 
     def recover(self):
         self.store.check()
+        reservation = (self.store.root / 'reservations' / self.path.name)
+        if reservation.is_symlink() or not reservation.is_file():
+            raise Invalid('missing reservation custody')
+        reserved_raw = reservation.read_bytes()
+        reservation_invalid = False
+        if reserved_raw.endswith(b'\n'):
+            try:
+                self.reservation()
+            except (Invalid, ValueError):
+                reservation_invalid = True
+        if not self.path.exists():
+            self.path.mkdir(mode=0o700)
+            synchronize_dir(self.store.root)
         names = ('registration.json', 'request.json', 'witness.json', 'events.jsonl')
         raw = {name: self.raw(name) for name in names}
         events, prefix, invalid = journal_prefix(raw['events.jsonl'] or b'', self.x)
+        invalid = invalid or reservation_invalid
         e_raw = (self.store.root / 'expectation.json').read_bytes()
+        capture_raw = self.raw('capture.json')
+        if capture_raw is not None and capture_raw.endswith(b'\n'):
+            try:
+                supporting = parse(capture_raw)
+                if type(supporting) is dict and type(supporting.get('dispatch')) is dict:
+                    dispatch = supporting['dispatch']
+                    if dispatch.get('attempt_id') != self.x or dispatch.get('expectation_sha256') != digest(e_raw):
+                        invalid = True
+            except Invalid:
+                invalid = True
         for name, kind in (('registration.json', 'registration'), ('request.json', 'request'), ('witness.json', 'witness')):
             if raw[name] is not None and raw[name].endswith(b'\n'):
                 try:
@@ -541,6 +642,7 @@ class Attempt:
                 raise Invalid('recovery conflict/partial write retained')
         else:
             retain(self.path / 'recovery.json', canonical(v))
+            self._packaging_authority = digest(canonical(v))
         return v
 
 
@@ -567,45 +669,10 @@ def verify_manifest(raw, files, kind, x, ehash):
 
 def public_accept(attempt, package_raw, sidecar, files, required_paths):
     """Frozen minimum inventory plus caller additions; no incomplete public ACCEPT."""
+    from .real_receipt_integration import verify_package, _all_files
     try:
-        ehash = digest((attempt.store.root / 'expectation.json').read_bytes())
-        events = attempt.events()
-        ordinal = attempt.path.name
-        observers = ('mi.commands mi.stdout mi.stderr order.jsonl admission.json maps.before '
-            'maps.stop1 maps.stop2 derivation.json stop1.json stop2.json arguments.json '
-            'B.derived.bin B.ready.bin B.entry.bin A.entry.bin completion.json').split()
-        mandatory = {'store.json', 'custody', 'reservation-journal.jsonl', 'expectation.json'}
-        mandatory |= {f'{ordinal}/{n}' for n in ('request.json', 'registration.json', 'events.jsonl',
-                      'witness.json', 'capture.json', 'capture-manifest.json')}
-        mandatory |= {f'{ordinal}/observer/{n}' for n in observers}
-        # The hash-addressed dossier must actually be present, never invented pins.
-        e = validate(parse((attempt.store.root / 'expectation.json').read_bytes()), 'expectation')
-        mandatory |= {f'qualification/{e[k]}' for k in ('spec_sha256', 'bootstrap_sha256',
-                       'observer_sha256', 'qualification_sha256')}
-        if (not events or events[-1]['state'] != 'ACCEPTED' or attempt.raw('recovery.json') is not None
-                or not mandatory | set(required_paths) <= set(files)
-                or not verify_manifest(package_raw, files, 'package', attempt.x, ehash)
-                or sidecar != (digest(package_raw) + '\n').encode('ascii')):
-            return False
-        # Bind package inputs to original durable evidence, not caller substitutes.
-        for name, raw in files.items():
-            p = attempt.store.root / name
-            if p.is_symlink() or p.read_bytes() != raw:
-                return False
-        captured = {name: raw for name, raw in files.items() if name.startswith('qualification/') or
-                    name.startswith(f'{ordinal}/observer/')}
-        if not verify_manifest(files[f'{ordinal}/capture-manifest.json'], captured, 'capture', attempt.x, ehash):
-            return False
-        for name, raw in files.items():
-            if name.startswith('qualification/') and digest(raw) != name.split('/')[-1]:
-                return False
-        if digest(files[f'{ordinal}/witness.json']) != events[-1]['witness_sha256']:
-            return False
-        for name in ('events.jsonl', 'witness.json', 'registration.json', 'request.json'):
-            if files.get(f'{ordinal}/{name}') != attempt.raw(name):
-                return False
-        if files.get('expectation.json') != (attempt.store.root / 'expectation.json').read_bytes():
-            return False
-        return True
-    except (ValueError, OSError, TypeError, KeyError):
+        return (package_raw == attempt.raw('package-manifest.json') and
+                sidecar == attempt.raw('package-manifest.sha256') and files == _all_files(attempt) and
+                set(required_paths) <= set(files) and verify_package(attempt, require_accept=True))
+    except (Invalid, OSError, TypeError, KeyError):
         return False
