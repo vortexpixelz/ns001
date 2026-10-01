@@ -84,6 +84,8 @@ class Memory:
 def native_memory(x=X, ehash=None):
     ehash = ehash or digest(canonical(expectation()))
     mem = Memory()
+    mem.ranges[0x581feb] = bytearray.fromhex('ffd0')
+    mem.ranges[0x69bff0] = bytearray.fromhex('f30f1efa')
     mem.object(B, 'bytes', 35)
     mem.word(B, 16, 2)
     mem.ranges[B][32:34] = b'#\n'
@@ -150,7 +152,7 @@ def capture(x=X, ehash=None, attempted='3' * 64):
                        reason='qualified-in-place-call-receiver', token=21)
     d = Derivation(x, 'retained-A-capability-chain', 7, 0x4f6102,
         (0x4f6102, 0x4f6224, 0x4f6274, 0x4f6299), 17, 7, 3, 0, 2, b'#\n',
-        0x99000, B, B, B, 0x88800, 0x88800, 1, 1, 15, 15, 2, 2, True)
+        0x99000, B, B, B, 0x581f90, 0x581f90, 1, 1, 15, 15, 2, 2, True)
     roles = ('controller launcher_gdb launcher_cpython bootstrap mi_parser decoder hash_tool guard '
              'qualification q1 provenance').split()
     artifacts = {r: ('synthetic-metadata:' + r).encode('ascii') for r in roles}

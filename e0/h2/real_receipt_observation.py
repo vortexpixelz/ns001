@@ -137,6 +137,8 @@ class _Grammar:
             self.i += 1
             return {} if c == '{' else []
         is_result = self.s[self.i:self.i + 1] not in ('"', '{', '[')
+        if c == '{' and not is_result:
+            raise Invalid('MI tuple requires results')
         result = {} if is_result and c == '{' else []
         while True:
             if is_result:
@@ -221,7 +223,11 @@ def derivation_codes(d, x, a):
     if (d.wrapper != 0x4f6102 or d.sites != (0x4f6102, 0x4f6224, 0x4f6274, 0x4f6299)
             or d.syscall_number != 17 or d.syscall_fd != d.fd or d.count != 3 or d.offset != 0
             or d.result != 2 or d.syscall_entries != 1 or d.syscall_exits != 1
-            or not d.uninterrupted or d.return_pc_in != d.return_pc_out
+            or d.uninterrupted is not True or d.return_pc_in != d.return_pc_out
+            or any(type(v) is not int or not 0 < v < 2**64 for v in
+                   (d.original_buffer, d.return_pc_in, d.return_pc_out))
+            or type(d.fd) is not int or not 0 <= d.fd < 2**31
+            or type(d.syscall_fd) is not int
             or type(d.syscall_capture) is not bytes or len(d.syscall_capture) != 2):
         return ['INPUT_IO']
     if not d.post_resize_b or not (d.post_resize_b == d.return_b == d.ready_b):
@@ -355,8 +361,9 @@ def evaluate_capture(capture, x, ehash, attempted):
                            'pidfd_death_confirmed': True, 'debugger_exit_confirmed': True,
                            'transcript_drained': True, 'no_resume': True,
                            'guard_coverage_complete': True}
-    if capture.completion != expected_completion:
-        return 'ABORT', ['ATTEMPT_INCOMPLETE']
+    if (type(capture.completion) is not dict or capture.completion != expected_completion or
+                any(type(v) is not bool for v in capture.completion.values())):
+        return 'ABORT', ranked(faults + ['ATTEMPT_INCOMPLETE'], recovery=True)
     if capture.receiver is not None:
         try:
             decoder = Decoder(Snapshot(capture.receiver.reads))

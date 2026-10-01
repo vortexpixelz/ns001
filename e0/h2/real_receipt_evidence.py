@@ -1,6 +1,7 @@
 """Additive real-input evidence store. No dispatch, compiler or observer runner."""
 import fcntl
 import os
+import copy
 from pathlib import Path, PurePosixPath
 from .real_receipt_policy import (Invalid, SCHEMA, PROFILE, PARAMETERS, DIGEST, canonical,
     parse, digest, keys, hash_value, attempt_id, ranked, parameters_match)
@@ -247,10 +248,17 @@ def retain(path, raw):
 
 def forensic_bytes(value):
     """Supporting capture encoding is separate from the frozen witness schema."""
-    from dataclasses import is_dataclass, asdict
+    from dataclasses import is_dataclass, fields
     def convert(v):
         if is_dataclass(v):
-            return convert(asdict(v))
+            from .real_receipt_integration import TextCapture
+            if type(v) is TextCapture:
+                return {'epoch': v.epoch, 'role': v.role, 'mapping': convert(v.mapping),
+                        'raw': {'artifact': v.filename, 'length': len(v.raw), 'sha256': digest(v.raw)}}
+            return {f.name: ({h: {'qualification_artifact': h, 'length': len(raw)}
+                             for h, raw in getattr(v, f.name).items()}
+                            if f.name == 'documents' else convert(getattr(v, f.name)))
+                    for f in fields(v)}
         if type(v) is bytes:
             return {'hex': v.hex(), 'length': len(v)}
         if type(v) is tuple:
@@ -302,6 +310,8 @@ class Store:
             retain(self.root / 'store.json', canonical(dict(schema=SCHEMA + 'store.v1', namespace=namespace)))
             retain(self.root / 'custody', canonical({'namespace': namespace, 'kind': 'exclusive-controller'}))
             retain(self.root / 'lock', b'')
+            info = (self.root / 'lock').stat()
+            retain(self.root / 'lock-identity.json', canonical({'device': info.st_dev, 'inode': info.st_ino}))
             retain(self.root / 'reservation-journal.jsonl', b'')
             (self.root / 'reservations').mkdir(mode=0o700)
             synchronize_dir(self.root)
@@ -319,6 +329,11 @@ class Store:
         except OSError:
             os.close(self.lock)
             raise Invalid('exclusive custody unavailable')
+        try:
+            self.check()
+        except BaseException:
+            self.close()
+            raise
 
     def close(self):
         if not self.closed:
@@ -329,11 +344,17 @@ class Store:
         if self.closed or self.failed:
             raise Invalid('stale writer')
         try:
-            valid = (validate(parse((self.root / 'store.json').read_bytes()), 'store')['namespace'] == self.namespace and
+            opened, current = os.fstat(self.lock), (self.root / 'lock').lstat()
+            identity = parse((self.root / 'lock-identity.json').read_bytes())
+            valid = (opened.st_nlink == 1 and current.st_nlink == 1 and
+                identity == {'device': opened.st_dev, 'inode': opened.st_ino} and
+                (opened.st_dev, opened.st_ino) == (current.st_dev, current.st_ino) and
+                validate(parse((self.root / 'store.json').read_bytes()), 'store')['namespace'] == self.namespace and
                 parse((self.root / 'custody').read_bytes()) == {'namespace': self.namespace, 'kind': 'exclusive-controller'})
         except (OSError, ValueError, KeyError, TypeError):
             valid = False
         if not valid:
+            self.failed = True
             raise Invalid('lost custody')
 
     def freeze(self, e, material):
@@ -423,6 +444,8 @@ class Attempt:
         self.path = store.root / str(ordinal)
         self.x = f'{store.namespace}:{ordinal}'
         self._preparation = None
+        self._preparation_input = None
+        self._preparation_bytes = None
         self._validated_terminal = None
         self._attempted_hash = None
         self._packaging_authority = None
@@ -533,20 +556,24 @@ class Attempt:
         try:
             r = validate(parse(self.raw('request.json')), 'request')
             if r['expectation_sha256'] != digest(canonical(e)):
-                faults = ['EXPECTATION_INVALID']
-            elif r['profile'] != PROFILE:
-                faults = ['PROFILE_UNQUALIFIED']
-            elif r['source_channel'] != 'protected_bytes' or r['source_environment'] or r['cwd_policy'] != 'exclusive-synthetic':
-                faults = ['SOURCE_REDIRECTION']
-            elif not parameters_match(r['parameters']):
-                faults = ['WRONG_ENTRYPOINT']
+                faults.append('EXPECTATION_INVALID')
+            if r['profile'] != PROFILE:
+                faults.append('PROFILE_UNQUALIFIED')
+            if r['source_channel'] != 'protected_bytes' or r['source_environment'] or r['cwd_policy'] != 'exclusive-synthetic':
+                faults.append('SOURCE_REDIRECTION')
+            if not parameters_match(r['parameters']):
+                faults.append('WRONG_ENTRYPOINT')
         except (ValueError, TypeError, KeyError):
             faults = ['EXPECTATION_INVALID']
-        if not faults:
-            faults = preparation_codes(preparation, self.x, e, self.store.namespace)
+        faults = ranked(faults + preparation_codes(preparation, self.x, e, self.store.namespace))
+        from .real_receipt_integration import frozen_role_codes, Preparation
+        if type(preparation) is Preparation:
+            faults = ranked(faults + frozen_role_codes(self.store, preparation, e))
         retain_preparation(self, preparation)
         if faults:
             w = measured_witness(preparation, None, self.x, e, None, faults, precondition=True)
+            faults = ranked(faults + witness_codes(w, self.x, e, None))
+            w['violations'] = faults
             validate(w, 'witness')
             _capture_manifest(self)
             retain(self.path / 'witness.json', canonical(w))
@@ -554,12 +581,16 @@ class Attempt:
             terminal = self.event('REFUSED', faults, False, self._validated_terminal)
             _package(self)
             return terminal
-        self._preparation = preparation
+        self._preparation_input = preparation
+        self._preparation = copy.deepcopy(preparation)
+        self._preparation_bytes = forensic_bytes(self._preparation)
         return self.event('PREPARED', entered=False)
 
     def attempted(self):
         from .real_receipt_integration import preparation_codes
         e = validate(parse((self.store.root / 'expectation.json').read_bytes()), 'expectation')
+        if forensic_bytes(self._preparation_input) != self._preparation_bytes:
+            raise Invalid('admission changed')
         if preparation_codes(self._preparation, self.x, e, self.store.namespace):
             raise Invalid('admission changed')
         self._attempted_hash = self.event('ATTEMPTED')
@@ -626,8 +657,17 @@ class Attempt:
                         set(faults) <= set([terminal['primary_code']] + terminal['diagnostics'])):
                     return terminal  # Preserve terminal despite incomplete packaging.
                 invalid = True
+        diagnostics = []
+        for name in ('supported-faults.json', 'observed-faults.json'):
+            supported = self.raw(name)
+            if supported is not None:
+                try:
+                    diagnostics = ranked(diagnostics + parse(supported))
+                except (Invalid, TypeError):
+                    invalid = True
+        primary = 'RECORD_INVALID' if invalid else 'ATTEMPT_INCOMPLETE'
         v = dict(schema=SCHEMA + 'recovery.v1', attempt_id=self.x, state='ABORTED',
-                 primary_code='RECORD_INVALID' if invalid else 'ATTEMPT_INCOMPLETE', diagnostics=[],
+                 primary_code=primary, diagnostics=[c for c in diagnostics if c != primary],
                  registration_sha256=digest(raw['registration.json']) if raw['registration.json'] is not None else None,
                  request_sha256=digest(raw['request.json']) if raw['request.json'] is not None else None,
                  witness_sha256=digest(raw['witness.json']) if raw['witness.json'] is not None else None,

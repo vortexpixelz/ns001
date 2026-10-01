@@ -27,6 +27,8 @@ class Transcript:
         self.raw = dict.fromkeys(('commands', 'stdout', 'stderr'), b'')
         self.order, self.commands, self.results, self.stops = [], {}, {}, []
         self.streams, self.stop_data = {}, {}
+        self.record_order = []
+        self.running_notification = False
         self.active_stop = None
         self.execution_token = None
         self.execution_running = False
@@ -61,6 +63,7 @@ class Transcript:
                 line += b'\n'
                 pending = self.parser.pending
                 rec = self.parser.feed(line, chunk.channel)
+                self.record_order.append((index, pending, rec))
                 if rec.kind in ('~', '&'):
                     if pending is not None:
                         self.streams[pending] += rec.fields
@@ -85,7 +88,7 @@ class Transcript:
                     if cmd.startswith('-exec-'):
                         if rec.kind != '^running':
                             raise Invalid('execution command did not run')
-                        self.execution_running = True
+                        self.execution_running = self.execution_token is not None
                     elif rec.kind != '^done':
                         raise Invalid('unexpected result class')
                     if cmd.startswith('-break-insert -h *'):
@@ -97,11 +100,18 @@ class Transcript:
                     if self.active_stop is not None:
                         self._read_response(cmd, rec)
                 elif rec.kind == '*running':
-                    if self.execution_token is None:
-                        raise Invalid('uncommanded running')
+                    if (self.execution_token is None or self.running_notification or
+                            rec.token not in (None, self.execution_token) or
+                            set(rec.fields) != {'thread-id'} or
+                            rec.fields['thread-id'] not in (b'all',) + tuple(str(t).encode() for t in self.threads)):
+                        raise Invalid('uncommanded/duplicate/unrelated running')
+                    self.running_notification = True
                 elif rec.kind == '*stopped':
-                    if self.execution_token is None:
+                    if (self.execution_token is None or not self.running_notification or
+                            rec.token not in (None, self.execution_token)):
                         raise Invalid('unassociated/duplicate stop')
+                    self.running_notification = False
+                    self.execution_running = False
                     # Result-before-stop and stop-before-result are both MI orderings;
                     # the outstanding exact execution token supplies the association.
                     execution = self.execution_token
@@ -120,7 +130,7 @@ class Transcript:
                         raise Invalid('duplicate/multiple/unbound thread')
                     self.threads[tid] = group
                 elif rec.kind in ('=thread-group-exited', '=thread-exited'):
-                    if len(self.stops) != 2 or self.parser.pending is not None:
+                    if not self.stops or self.parser.pending is not None:
                         raise Invalid('premature process exit')
                 elif rec.kind == 'prompt':
                     pass
@@ -240,6 +250,17 @@ class Transcript:
         first_execution = min((t for t, c in self.commands.items() if c.startswith('-exec-')), default=2**31)
         if any(t >= first_execution for t, c in self.commands.items() if c.startswith('-interpreter-exec console "show ')):
             raise Invalid('late policy readback')
+        # Complete setup history is reconciled, including notifications before commands.
+        policy_end = max(i for i, _, rec in self.record_order
+                         if rec.kind == '^done' and rec.token in
+                         [t for t, c in self.commands.items() if c.startswith('-interpreter-exec console \"show ')])
+        for i, owner, rec in self.record_order:
+            if rec.kind in ('=thread-group-started', '=thread-created', '*running', '*stopped') and i <= policy_end:
+                raise Invalid('inferior/event before Q1 policy')
+            if (rec.kind in ('~', '&') and rec.fields and
+                    self.commands.get(owner, '') not in
+                    ['-interpreter-exec console ' + json.dumps(show) for show in READBACKS]):
+                raise Invalid('unqualified setup diagnostic')
         return result
 
     def snapshot(self, index, custody, roots, reasons):
@@ -255,6 +276,9 @@ class Transcript:
             if (pc != regs['rip'] or tid != custody['tid'] or rec.fields.get('stopped-threads') != b'all' or
                     self.groups.get(self.threads.get(tid)) != custody['pid']):
                 raise Invalid('stop snapshot association')
+            if ('signal-name' in rec.fields and rec.fields['signal-name'] != b'SIGTRAP' or
+                    'signal-meaning' in rec.fields or any(k in rec.fields for k in ('exit-code', 'core'))):
+                raise Invalid('contradictory stop signal/exit')
             reason = rec.fields['reason'].decode('ascii')
             binding = reasons[index]
             keys(binding, 'command reason pc trap mechanism')
@@ -302,24 +326,51 @@ class Preparation:
     a_capture: bytes
     transcript: tuple
     documents: dict
+    text_captures: tuple = ()
+    native_derivation: tuple = ()
+    native_controls: tuple = ()
 
 
 def preparation_codes(p, x, e, namespace):
-    """Ordered admission stages, derived from retained records and raw snapshots."""
-    from .real_receipt_evidence import forensic_bytes
+    """Gather independently supported stage faults, then apply frozen precedence.
+
+    A damaged earlier stage never causes later supplied negative evidence to vanish;
+    missing measurements fail their own stage without inventing replacement inputs.
+    """
+    if type(p) is not Preparation:
+        return ['EXPECTATION_INVALID']
+    stages = (_protected_codes, _derivation_codes, _engine_codes, _callable_codes,
+              _custody_codes, _guard_codes, _observer_codes)
+    return ranked([code for stage in stages for code in stage(p, x, e, namespace)] +
+                  supported_guard_faults(p, None))
+
+
+def _protected_codes(p, x, e, namespace):
     try:
-        if type(p) is not Preparation:
-            return ['EXPECTATION_INVALID']
         expected_protected = {'attempt_id': x, 'identity': p.derivation.a_identity,
             'kind': 'regular-memfd', 'size': 2, 'seals': 15, 'writable_mappings': 0,
             'origin': 'exclusive-fresh-acquisition'}
         if canonical(p.protected) != canonical(expected_protected) or p.a_capture != b'#\n':
             return ['WRONG_PROTECTED_OBJECT']
+        return []
+    except (Invalid, KeyError, TypeError, AttributeError, UnicodeError):
+        return ['WRONG_PROTECTED_OBJECT']
+
+
+def _derivation_codes(p, x, e, namespace):
+    try:
         faults = derivation_codes(p.derivation, x, p.protected['identity'])
         if faults:
             return faults
         if digest(p.derivation.syscall_capture) != DIGEST:
             return ['INPUT_ALTERED']
+        return []
+    except (Invalid, KeyError, TypeError, AttributeError, UnicodeError):
+        return ['INPUT_IO']
+
+
+def _engine_codes(p, x, e, namespace):
+    try:
         faults = engine_admission(p.engine, p.pins, p.artifacts)
         if faults:
             return faults
@@ -332,6 +383,13 @@ def preparation_codes(p, x, e, namespace):
             return ['ENGINE_UNQUALIFIED']
         if p.artifacts['bootstrap'] != canonical(p.bootstrap) or p.artifacts['q1'] != canonical(p.q1):
             return ['OBSERVER_UNQUALIFIED']
+        return []
+    except (Invalid, KeyError, TypeError, AttributeError, UnicodeError):
+        return ['ENGINE_UNQUALIFIED']
+
+
+def _callable_codes(p, x, e, namespace):
+    try:
         d = Decoder(Snapshot(p.ready.reads))
         b, c, m = p.ready.roots
         try:
@@ -342,6 +400,13 @@ def preparation_codes(p, x, e, namespace):
                 return ['WRONG_COMPILE_CALLABLE']
         except Invalid:
             return ['WRONG_COMPILE_CALLABLE']
+        return []
+    except (Invalid, KeyError, TypeError, AttributeError, UnicodeError):
+        return ['WRONG_COMPILE_CALLABLE']
+
+
+def _custody_codes(p, x, e, namespace):
+    try:
         keys(p.custody, 'namespace controller pid tid creation_id parent_chain credentials channel')
         if (p.custody['namespace'] != namespace or type(p.custody['controller']) is not str or not p.custody['controller'] or
                 type(p.custody['creation_id']) is not str or not p.custody['creation_id'] or
@@ -355,6 +420,13 @@ def preparation_codes(p, x, e, namespace):
             shutdown='kill-stopped-no-finalizers', setup_epoch='completed-before-derivation')
         if canonical(p.bootstrap) != canonical(bootstrap):
             return ['OBSERVER_UNQUALIFIED']
+        return []
+    except (Invalid, KeyError, TypeError, AttributeError, UnicodeError):
+        return ['OBSERVER_UNQUALIFIED']
+
+
+def _guard_codes(p, x, e, namespace):
+    try:
         keys(p.guard, 'source_channel environment payload_operations execution_operations coverage')
         if (type(p.guard['environment']) is not dict or type(p.guard['payload_operations']) is not list or
                 type(p.guard['execution_operations']) is not list or type(p.guard['coverage']) is not list):
@@ -371,6 +443,15 @@ def preparation_codes(p, x, e, namespace):
             return ['EXECUTION_PROHIBITED']
         if p.guard['coverage'] != ['derivation', 'ready', 'caller', 'receiver', 'kill', 'death']:
             return ['OBSERVER_UNQUALIFIED']
+        return []
+    except (Invalid, KeyError, TypeError, AttributeError, UnicodeError):
+        return ['OBSERVER_UNQUALIFIED']
+
+
+def _observer_codes(p, x, e, namespace):
+    try:
+        b, c, m = p.ready.roots
+        d = Decoder(Snapshot(p.ready.reads))
         transcript = Transcript(p.transcript)
         settings = transcript.readbacks(p.q1)
         admission = p.admission
@@ -397,7 +478,7 @@ def preparation_codes(p, x, e, namespace):
         if type(text) is not list or [t.get('role') for t in text] != ['launcher', 'executable', 'loader']:
             return ['ENGINE_UNQUALIFIED']
         references = parse(p.artifacts['qualification'])
-        keys(references, 'text_ranges trap_policy')
+        keys(references, 'text_ranges trap_policy tool_roles setup_path')
         if references['trap_policy'] != p.q1['native_reasons']:
             return ['OBSERVER_UNQUALIFIED']
         if len(references['text_ranges']) != len(text):
@@ -409,12 +490,15 @@ def preparation_codes(p, x, e, namespace):
                 return ['ENGINE_UNQUALIFIED']
             for k in ('reference_sha256', 'supervisor_sha256', 'mi_sha256'):
                 hash_value(measured[k])
-            if ({k: measured[k] for k in ('role', 'file_offset', 'length', 'reference_sha256')} != ref or
+            if ({k: measured[k] for k in ('role', 'file_offset', 'length', 'reference_sha256')} != {k: ref[k] for k in ('role', 'file_offset', 'length', 'reference_sha256')} or
                     measured['supervisor_sha256'] != ref['reference_sha256'] or measured['mi_sha256'] != ref['reference_sha256'] or
                     measured['writable_executable'] is not False):
                 return ['ENGINE_UNQUALIFIED']
         if text[1]['file_offset'] != 0x020000 or text[1]['length'] != 0x302fbc - 0x020000 + 1:
             return ['ENGINE_UNQUALIFIED']
+        validate_setup(p, transcript, references)
+        validate_controls(p)
+        validate_text(p, p.text_captures, ('launcher', 'post-exec', 'ready'))
         if settings != dict(zip(READBACKS[:26], Q1)):
             return ['OBSERVER_UNQUALIFIED']
         # READY roots/bytes and actual callable association, not a supplied ready flag.
@@ -439,6 +523,7 @@ class Observation:
     guard_operations: tuple = ()
     interrupted: bool = False
     native_stops: tuple = ()
+    text_captures: tuple = ()
 
 
 def decode_observation(p, observation, x, e, attempted):
@@ -477,26 +562,62 @@ def decode_observation(p, observation, x, e, attempted):
         raise Invalid('post-receiver resume')
     if observation.protected_final != p.protected:
         faults.append('OBJECT_SUBSTITUTION')
-    if len(observation.maps) != 2 or any(m != canonical(p.admission['text']) for m in observation.maps):
+    if len(observation.maps) != 2 or any(m != text_maps(observation.text_captures, epoch)
+            for m, epoch in zip(observation.maps, ('caller', 'receiver'))):
         faults.append('ENGINE_UNQUALIFIED')
+    validate_text(p, observation.text_captures, ('caller', 'receiver'))
+    for stop in (caller, receiver):
+        code = Snapshot(stop.reads)
+        if code.read(ENGINE['caller'], 2) != bytes.fromhex(ENGINE['caller_hex']) or code.read(ENGINE['receiver'], 4) != bytes.fromhex(ENGINE['receiver_hex']):
+            raise Invalid('missing/changed actual CALL/entry bytes')
     for op in observation.guard_operations:
         faults.append('EXECUTION_PROHIBITED' if op == 'execution' else
                       'SOURCE_REDIRECTION' if op == 'source_redirect' else 'PATHNAME_REOPEN')
     b, c, m = p.ready.roots
-    facts = dict.fromkeys(('before_inferior continuous_policy empty_initial_inventory stopping_on register_control_on observer_off '
-        'auto_load_all_off classic_loader_denied_disabled no_unexpected_internal_sites no_libthread_db native_exec_event '
-        'ptrace_syscall_events in_place_single_call_step receiver_stays_armed raw_unmasked_text_equal complete_text_ranges '
-        'two_effective_slots kernel_programming_witnessed blocked_gate_restop death_chain_qualified no_software_fallback '
-        'no_post_entry_resume').split(), True)
-    # These derived predicates are formed only after validated preparation/transcript,
-    # never accepted as bypass flags in the integrated admission interface.
+    setup = Transcript(p.transcript)
+    settings = setup.readbacks(p.q1)
+    references = parse(p.artifacts['qualification'])
+    setup_facts = validate_setup(p, setup, references)
+    controls = validate_controls(p)
+    facts = {
+        'before_inferior': not any(i <= setup_facts['policy_end'] and r.kind in
+            ('=thread-group-started', '=thread-created') for i, _, r in setup.record_order),
+        'continuous_policy': settings == p.q1['settings'],
+        'empty_initial_inventory': p.admission['initial_inventory'] == [],
+        'stopping_on': setup_facts['readback_values']['show may-stop'] == b'on',
+        'register_control_on': setup_facts['readback_values']['show may-write-registers'] == b'on',
+        'observer_off': setup_facts['readback_values']['show observer'] == b'off',
+        'auto_load_all_off': settings.get('show auto-load') == 'set auto-load off',
+        'classic_loader_denied_disabled': all(o['insertion'] == 'denied-before-delegation' and
+            o['location'] == 'shlib-disabled' for o in p.admission['loader_inventory']),
+        'no_unexpected_internal_sites': not any(stream for token, stream in setup.streams.items()
+            if not setup.commands[token].startswith('-interpreter-exec console "show ')),
+        'no_libthread_db': p.q1['outputs']['show auto-load']['facilities'][2]['name'] == 'libthread-db'
+            and settings['show libthread-db-search-path'] == 'set libthread-db-search-path /dev/null',
+        'native_exec_event': controls['exec'],
+        'ptrace_syscall_events': setup_facts['syscalls'] == (1, 1),
+        'in_place_single_call_step': transcript.commands[receiver.token] == '-exec-step-instruction'
+            and receiver.registers['rsp'] == caller.registers['rsp'] - 8,
+        'receiver_stays_armed': setup_facts['monitor_armed'] and len(p.admission['controls']) == 2 and p.admission['step']['receiver_slot'] == 'armed',
+        'raw_unmasked_text_equal': validate_text(p, observation.text_captures, ('caller', 'receiver')),
+        'complete_text_ranges': validate_text(p, p.text_captures, ('launcher', 'post-exec', 'ready')),
+        'two_effective_slots': controls['slots'] == [0, 1],
+        'kernel_programming_witnessed': controls['writes'] == [0, 1],
+        'blocked_gate_restop': controls['restop'] and setup_facts['ready'] and dispatch['gate'] == 'released-once-after-fsync',
+        'death_chain_qualified': p.admission['death'] == ['controller-loss-kills-gdb', 'gdb-loss-kills-child', 'parent-checks-match'],
+        'no_software_fallback': controls['hardware_traps'] == [0, 1],
+        'no_post_entry_resume': not any(c.startswith('-exec-') for t, c in transcript.commands.items() if t > receiver.token),
+    }
+    entry_count = setup_facts['receiver_hits'] + sum(_hex(r.fields['frame']['addr']) == ENGINE['receiver']
+        for _, _, r in transcript.stops)
+    sentinel_count = setup_facts['receiver_hits'] + sum(n['pc'] == ENGINE['receiver'] for n in observation.native_stops)
     cap = Capture(x, digest(canonical(e)), attempted, dispatch['attempted_sha256'], caller, receiver,
         receiver.token, p.derivation, p.protected['identity'], observation.a_capture,
-        Decoder(Snapshot(p.ready.reads)).bytes(b), b, c, m, 1, 1, False,
-        observation.completion, p.engine, p.pins, p.artifacts, dict(zip(READBACKS[:26], Q1)), facts)
+        Decoder(Snapshot(p.ready.reads)).bytes(b), b, c, m, entry_count, sentinel_count, False,
+        observation.completion, p.engine, p.pins, p.artifacts, settings, facts)
     decision, measured = evaluate_capture(cap, x, digest(canonical(e)), attempted)
     if decision == 'ABORT':
-        return cap, transcript, ['ATTEMPT_INCOMPLETE']
+        return cap, transcript, ranked(faults + measured, recovery=True)
     return cap, transcript, ranked(faults + measured)
 
 
@@ -601,11 +722,13 @@ def retain_preparation(attempt, p):
             'setup.mi.stderr': raws['stderr'], 'setup.order.jsonl': b''.join(canonical(o) for o in order),
             'derivation.json': forensic_bytes(p.derivation), 'B.derived.bin': p.derivation.syscall_capture})
         if type(p.admission) is dict and 'text' in p.admission:
-            files['maps.before'] = canonical(p.admission['text'])
+            files['maps.before'] = text_maps(p.text_captures, 'ready')
         try:
             files['B.ready.bin'] = Decoder(Snapshot(p.ready.reads)).bytes(p.ready.roots[0])
         except (Invalid, KeyError, AttributeError, TypeError):
             pass  # Preserve only actually measured bytes; no placeholder capture.
+    if type(p) is Preparation:
+        files.update(text_files(p.text_captures))
     try:
         _retain_observer(attempt, files)
     except BaseException:
@@ -666,7 +789,7 @@ def _package(attempt):
     snap = attempt.path / 'store-snapshot'
     snap.mkdir(mode=0o700)
     synchronize_dir(attempt.path)
-    for name in ('store.json', 'custody', 'lock', 'reservation-journal.jsonl'):
+    for name in ('store.json', 'custody', 'lock', 'lock-identity.json', 'reservation-journal.jsonl'):
         retain(snap / name, (attempt.store.root / name).read_bytes())
     files = _all_files(attempt)
     raw = canonical(manifest('package', attempt.x,
@@ -699,7 +822,7 @@ def verify_package(attempt, require_accept=False):
             if n.startswith('qualification/') and digest(b) != n.split('/')[-1]:
                 return False
         mandatory = {f'qualification/{e[k]}' for k in ('spec_sha256', 'bootstrap_sha256', 'observer_sha256', 'qualification_sha256')}
-        mandatory |= {f'{ordinal}/store-snapshot/{n}' for n in ('store.json', 'custody', 'lock', 'reservation-journal.jsonl')}
+        mandatory |= {f'{ordinal}/store-snapshot/{n}' for n in ('store.json', 'custody', 'lock', 'lock-identity.json', 'reservation-journal.jsonl')}
         mandatory |= {f'reservations/{ordinal}', 'expectation.json'}
         if not mandatory <= set(files):
             return False
@@ -720,7 +843,9 @@ def verify_package(attempt, require_accept=False):
                 req['profile'] != PROFILE or not parameters_match(req['parameters']) or
                 req['source_channel'] != 'protected_bytes' or req['source_environment'] or req['cwd_policy'] != 'exclusive-synthetic'):
             return False
-        required = ('mi.commands mi.stdout mi.stderr order.jsonl admission.json maps.before maps.stop1 maps.stop2 '
+        if f'{ordinal}/capture.json' not in files:
+            return False
+        required = ('native-stops.json mi.commands mi.stdout mi.stderr order.jsonl admission.json maps.before maps.stop1 maps.stop2 '
             'derivation.json stop1.json stop2.json arguments.json B.derived.bin B.ready.bin B.entry.bin A.entry.bin '
             'completion.json setup.mi.commands setup.mi.stdout setup.mi.stderr setup.order.jsonl').split()
         if not {f'{ordinal}/observer/{n}' for n in required} <= set(files):
@@ -734,8 +859,49 @@ def verify_package(attempt, require_accept=False):
         from .real_receipt_evidence import witness_codes
         if witness_codes(w, attempt.x, e, digest(canonical(events[-2]))):
             return False
+        # Reparse the original captures and independently reproduce terminal facts.
+        p, o = retained_inputs(attempt, files)
+        if preparation_codes(p, attempt.x, e, attempt.store.namespace) or frozen_role_codes(attempt.store, p, e):
+            return False
+        tried = digest(canonical(events[-2]))
+        cap, transcript, faults = decode_observation(p, o, attempt.x, e, tried)
+        if cap is None or faults or canonical(measured_witness(p, cap, attempt.x, e, tried, [])) != attempt.raw('witness.json'):
+            return False
+        from .real_receipt_evidence import forensic_bytes
+        if files[f'{ordinal}/observer/native-stops.json'] != forensic_bytes(o.native_stops):
+            return False
+        if files[f'{ordinal}/observer/derivation.json'] != forensic_bytes(p.derivation):
+            return False
+        if files[f'{ordinal}/observer/stop1.json'] != forensic_bytes(cap.caller) or files[f'{ordinal}/observer/stop2.json'] != forensic_bytes(cap.receiver):
+            return False
+        for name, raw in transcript.artifacts().items():
+            if files[f'{ordinal}/observer/{name}'] != raw:
+                return False
+        if files[f'{ordinal}/observer/completion.json'] != canonical(o.completion):
+            return False
+        if files[f'{ordinal}/observer/maps.before'] != text_maps(p.text_captures, 'ready'):
+            return False
+        for i, raw in enumerate(o.maps, 1):
+            if files[f'{ordinal}/observer/maps.stop{i}'] != raw:
+                return False
+        setup = Transcript(p.transcript)
+        for name, raw in setup.artifacts().items():
+            if files[f'{ordinal}/observer/setup.{name}'] != raw:
+                return False
+        d = Decoder(Snapshot(cap.receiver.reads))
+        source = d.s.number(cap.receiver.registers['rsi'])
+        _, parameters, _ = d.arguments(cap.receiver.registers, cap.b)
+        if files[f'{ordinal}/observer/arguments.json'] != canonical({'parameters': parameters, 'source': source}):
+            return False
+        if parse(files[f'{ordinal}/supported-faults.json']):
+            return False
+        if f'{ordinal}/observed-faults.json' in files and parse(files[f'{ordinal}/observed-faults.json']):
+            return False
+        for name, raw in text_files(p.text_captures + o.text_captures).items():
+            if files[f'{ordinal}/observer/{name}'] != raw:
+                return False
         return True
-    except (Invalid, ValueError, KeyError, TypeError, OSError):
+    except (Invalid, ValueError, KeyError, TypeError, OSError, AttributeError):
         return False
 
 
@@ -743,6 +909,14 @@ def finish_observation(attempt, p, observation, e, attempted, supplied_witness=N
     from .real_receipt_evidence import retain, forensic_bytes, validate, witness_codes
     if observation is None:
         raise Invalid('raw observation required')
+    # Retain known guard faults before any interrupted decode can erase them.
+    known = supported_guard_faults(p, observation)
+    if (forensic_bytes(attempt._preparation_input) != attempt._preparation_bytes or
+            forensic_bytes(p) != attempt._preparation_bytes):
+        known += supported_guard_faults(attempt._preparation_input, None) + ['RECORD_INVALID']
+        _retain_observer(attempt, {'admission-later.json': forensic_bytes(attempt._preparation_input)})
+    known = ranked(known)
+    retain(attempt.path / 'supported-faults.json', canonical(known))
     # Preserve the whole submitted object, including incomplete/interrupted inputs.
     retain(attempt.path / 'capture.json', forensic_bytes(observation))
     raws, order = dict.fromkeys(('commands', 'stdout', 'stderr'), b''), []
@@ -753,6 +927,8 @@ def finish_observation(attempt, p, observation, e, attempted, supplied_witness=N
                 raws[chunk.channel] += chunk.raw
     rawfiles = {'mi.commands': raws['commands'], 'mi.stdout': raws['stdout'], 'mi.stderr': raws['stderr'],
                 'order.jsonl': b''.join(canonical(o) for o in order)}
+    if type(observation) is Observation:
+        rawfiles.update(text_files(observation.text_captures))
     _retain_observer(attempt, rawfiles)
     try:
         cap, transcript, faults = decode_observation(p, observation, attempt.x, e, attempted)
@@ -761,7 +937,9 @@ def finish_observation(attempt, p, observation, e, attempted, supplied_witness=N
         _capture_manifest(attempt)
         _package(attempt)
         return attempt.raw('recovery.json')
+    faults = ranked(faults + known, recovery=True)
     if cap is None or 'ATTEMPT_INCOMPLETE' in faults:
+        retain(attempt.path / 'observed-faults.json', canonical([f for f in faults if f != 'ATTEMPT_INCOMPLETE']))
         result = attempt.recover()
         _capture_manifest(attempt)
         _package(attempt)
@@ -849,8 +1027,276 @@ def compare_repetition(left, right):
                 o['data'] = {k: v for k, v in o['data'].items() if k != 'attempted_event_sha256'}
         captures = [(a.path / 'observer' / n).read_bytes() for n in
                     ('B.derived.bin', 'B.ready.bin', 'B.entry.bin', 'A.entry.bin')]
-        return canonical([e, request, reg, events, witness]), captures
+        roles = parse((a.store.root / 'qualification' / e['qualification_sha256']).read_bytes())['tool_roles']
+        return canonical([e, request, reg, events, witness, roles]), captures
     try:
         return semantic(left) == semantic(right)
     except (Invalid, OSError, KeyError, TypeError):
         return False
+
+
+@dataclass(frozen=True)
+class TextCapture:
+    """Independent binary read plus its stopped-child/file-handle map association.
+
+    Raw supervisor bytes stay outside MI/JSON bounds. The MI site reads must agree
+    with these bytes. No read primitive is executed by this offline interface.
+    """
+    epoch: str
+    role: str
+    mapping: dict
+    raw: bytes
+
+    @property
+    def filename(self):
+        if self.epoch not in ('launcher', 'post-exec', 'ready', 'caller', 'receiver') or self.role not in ('launcher', 'executable', 'loader'):
+            raise Invalid('text artifact role/epoch')
+        return f'text.{self.epoch}.{self.role}.bin'
+
+
+def text_files(captures):
+    files = {}
+    for c in captures:
+        if type(c) is not TextCapture or c.filename in files or type(c.raw) is not bytes or not 0 < len(c.raw) <= 4 * 1024 * 1024:
+            raise Invalid('bounded binary text artifact')
+        files[c.filename] = c.raw
+    return files
+
+
+def text_maps(captures, epoch):
+    return canonical([dict(role=c.role, **c.mapping) for c in captures if c.epoch == epoch])
+
+
+def validate_text(p, captures, epochs):
+    refs = parse(p.artifacts['qualification'])['text_ranges']
+    expected = [(epoch, r['role']) for epoch in epochs for r in refs
+                if r['role'] in (('launcher', 'loader') if epoch == 'launcher' else ('executable', 'loader'))]
+    if [(c.epoch, c.role) for c in captures] != expected:
+        raise Invalid('missing/duplicate text epoch/range')
+    for c in captures:
+        ref = next(r for r in refs if r['role'] == c.role)
+        m = c.mapping
+        keys(m, 'start end file_offset device inode handle load_bias pid tid source image_sha256')
+        if (any(type(m[k]) is not int or m[k] < 0 for k in ('start', 'end', 'file_offset', 'device', 'inode', 'load_bias', 'pid', 'tid')) or
+                m['source'] != 'independent-supervisor-unmasked-read' or not m['inode'] or not m['handle'] or
+                m['pid'] != p.custody['pid'] or m['tid'] != p.custody['tid'] or
+                m['start'] != ref['address'] or m['end'] != m['start'] + ref['length'] or
+                m['file_offset'] != ref['file_offset'] or m['image_sha256'] != ref['image_sha256'] or
+                m['load_bias'] != ref['load_bias'] or
+                type(c.raw) is not bytes or len(c.raw) != ref['length'] or
+                len(c.raw) > 4 * 1024 * 1024 or digest(c.raw) != ref['reference_sha256'] or
+                p.documents.get(ref['reference_sha256']) != c.raw):
+            raise Invalid('raw text/map/reference association')
+        if c.role == 'executable':
+            for pc, raw in ((ENGINE['caller'], bytes.fromhex(ENGINE['caller_hex'])),
+                            (ENGINE['receiver'], bytes.fromhex(ENGINE['receiver_hex']))):
+                off = pc - m['start']
+                if off < 0 or c.raw[off:off + len(raw)] != raw:
+                    raise Invalid('raw CALL/entry text')
+    for c in captures:
+        prior = next((b for b in p.text_captures if b.role == c.role), None)
+        if prior is not None and c.mapping != prior.mapping:
+            raise Invalid('post-admission backing map change')
+    # Same open reference and map identity across all stopped epochs of each image.
+    for role in ('launcher', 'executable', 'loader'):
+        maps = [canonical(c.mapping) for c in captures if c.role == role]
+        if maps and any(m != maps[0] for m in maps):
+            raise Invalid('text backing handle/map changed')
+    return True
+
+
+def frozen_role_codes(store, p, e):
+    try:
+        q = store.root / 'qualification' / e['qualification_sha256']
+        roles = parse(q.read_bytes())['tool_roles']
+        if roles != {r: h for r, h in p.pins.items() if r != 'qualification'}:
+            return ['ENGINE_UNQUALIFIED']
+        if p.pins['qualification'] != e['qualification_sha256']:
+            return ['ENGINE_UNQUALIFIED']
+        for r, h in p.pins.items():
+            path = store.root / 'qualification' / h
+            if path.is_symlink() or path.read_bytes() != p.artifacts[r]:
+                return ['ENGINE_UNQUALIFIED']
+        return []
+    except (Invalid, OSError, KeyError, TypeError, AttributeError):
+        return ['ENGINE_UNQUALIFIED']
+
+
+def supported_guard_faults(p, observation):
+    faults = []
+    if type(p) is Preparation and type(p.guard) is dict:
+        if p.guard.get('execution_operations'):
+            faults.append('EXECUTION_PROHIBITED')
+        if p.guard.get('payload_operations'):
+            faults.append('PATHNAME_REOPEN')
+        if p.guard.get('source_channel') != 'protected_bytes' or p.guard.get('environment'):
+            faults.append('SOURCE_REDIRECTION')
+    if type(observation) is Observation:
+        if type(observation.guard_operations) is not tuple:
+            return ranked(faults + ['OBSERVATION_MISSING'])
+        for op in observation.guard_operations:
+            faults.append('EXECUTION_PROHIBITED' if op == 'execution' else
+                          'SOURCE_REDIRECTION' if op == 'source_redirect' else 'PATHNAME_REOPEN')
+    return ranked(faults)
+
+
+def validate_setup(p, transcript, references):
+    """Reconcile every setup stop with the independently frozen native path.
+
+    Native syscall/wrapper values are decoded from addressed raw reads/registers;
+    the caller's Derivation descriptor cannot supply missing measurements.
+    """
+    path = references['setup_path']
+    if len(path) != 7 or len(transcript.stops) != len(path) or len(p.native_derivation) != len(path):
+        raise Invalid('incomplete/unexpected setup stop history')
+    if transcript.groups != {b'i1': p.custody['pid']} or transcript.threads != {p.custody['tid']: b'i1'}:
+        raise Invalid('setup sole inferior/thread custody')
+    # The receiver monitor is installed before the first setup continuation and
+    # retained through READY; a final descriptor cannot backfill lifetime coverage.
+    first_exec = min(t for t, c in transcript.commands.items() if c.startswith('-exec-'))
+    receiver_inserts = [t for t, c in transcript.commands.items() if c == '-break-insert -h *0x69bff0']
+    caller_inserts = [t for t, c in transcript.commands.items() if c == '-break-insert -h *0x581feb']
+    if len(receiver_inserts) != 1 or receiver_inserts[0] >= first_exec or len(caller_inserts) != 1:
+        raise Invalid('missing lifetime receiver/ready caller instrumentation')
+    monitor = transcript.results[receiver_inserts[0]].fields.get('bkpt', {})
+    monitor_id = _decimal(monitor.get('number'))
+    if any(c == f'-break-delete {monitor_id}' for c in transcript.commands.values()):
+        raise Invalid('lifetime receiver monitor retired')
+    if caller_inserts[0] <= transcript.stops[-1][1]:
+        raise Invalid('caller armed outside READY admission phase')
+    snapshots = []
+    for i, (binding, native) in enumerate(zip(path, p.native_derivation)):
+        stop = transcript.snapshot(i, p.custody, p.ready.roots, path)
+        if stop.registers['rip'] != binding['pc'] or native != dict(token=stop.token, pid=stop.pid,
+                tid=stop.tid, pc=stop.registers['rip'], signal='SIGTRAP', mechanism=binding['mechanism'],
+                trap=binding['trap'], registers=stop.registers, reads=[dict(address=r.address,
+                requested=r.requested, hex=r.data.hex()) for r in stop.reads],
+                source='independent-native-stop-capture'):
+            raise Invalid('setup native/MI association')
+        snapshots.append(stop)
+    pcs = tuple(s.registers['rip'] for s in snapshots)
+    if pcs != (0x4f6102, 0x4f621f, 0x4f6224, 0x4f6224, 0x4f6274, 0x4f6299, p.ready.registers['rip']):
+        raise Invalid('unqualified derivation control path')
+    wrapper, entry, exit_, returned, resized, ret, ready = snapshots
+    w, a, z, r, b, v = [s.registers for s in snapshots[:6]]
+    d = p.derivation
+    wm, zm, bm, vm = [Snapshot(s.reads) for s in (wrapper, exit_, resized, ret)]
+    from .real_receipt_observation import Derivation
+    measured = Derivation(d.attempt, d.a_identity, w['rdi'], w['rip'],
+        (w['rip'], r['rip'], b['rip'], v['rip']), a['rax'], a['rdi'], a['rdx'], a['r10'],
+        z['rax'], zm.read(a['rsi'], 2), a['rsi'], bm.number(b['rbp'] - 0x38), v['rax'],
+        ready.roots[0], wm.number(w['rsp']), vm.number(v['rsp']),
+        sum(q['reason'] == 'syscall-entry' for q in path), sum(q['reason'] == 'syscall-return' for q in path),
+        d.seals_before, d.seals_after, d.size_before, d.size_after,
+        all(s.pid == wrapper.pid and s.tid == wrapper.tid for s in snapshots))
+    from .real_receipt_evidence import forensic_bytes
+    em = Snapshot(entry.reads)
+    if (a['rsi'] != em.number(a['rbp'] - 0x38) + 32 or
+            Decoder(Snapshot(resized.reads)).bytes(measured.post_resize_b) != measured.syscall_capture or
+            Decoder(Snapshot(ret.reads)).bytes(measured.return_b) != measured.syscall_capture):
+        raise Invalid('raw original buffer/resize bytes association')
+    if (forensic_bytes(measured) != forensic_bytes(d) or derivation_codes(measured, d.attempt, p.protected['identity']) or
+            w['rsi'] != 3 or w['rdx'] != 0 or r['rax'] != 2 or
+            any(z[k] != a[k] for k in ('rdi', 'rsi', 'rdx', 'r10')) or
+            not 0x420000 <= measured.return_pc_in <= 0x702fbc):
+        raise Invalid('raw pread/call/resize/return chain')
+    if ready.registers != p.ready.registers or ready.reads != p.ready.reads:
+        raise Invalid('READY capture not associated with setup')
+    policy_tokens = [t for t, c in transcript.commands.items() if c.startswith('-interpreter-exec console "show ')]
+    policy_end = max(i for i, _, rec in transcript.record_order if rec.kind == '^done' and rec.token in policy_tokens)
+    values = {}
+    for show in ('show may-stop', 'show may-write-registers', 'show observer'):
+        token = next(t for t, cmd in transcript.commands.items() if cmd == '-interpreter-exec console ' + json.dumps(show))
+        form = p.q1['outputs'][show]
+        values[show] = transcript.streams[token][len(bytes.fromhex(form['prefix'])):-len(bytes.fromhex(form['suffix']))]
+    return dict(policy_end=policy_end, readback_values=values, ready=pcs[-1] == p.ready.registers['rip'], monitor_armed=monitor.get('enabled') == b'y',
+        receiver_hits=sum(pc == ENGINE['receiver'] for pc in pcs), syscalls=(measured.syscall_entries, measured.syscall_exits))
+
+
+def retained_inputs(attempt, files):
+    """Decode only the known supporting evidence interface; no dynamic constructors.
+
+    Binary links resolve to retained artifacts with exact byte lengths/hashes.
+    This is read-only replay, never evidence reconstruction or missing-file repair.
+    """
+    prefix = attempt.path.name + '/observer/'
+    def decode(v):
+        if type(v) is dict:
+            if set(v) == {'hex', 'length'}:
+                raw = bytes.fromhex(v['hex'])
+                if len(raw) != v['length']:
+                    raise Invalid('supporting hex length')
+                return raw
+            if set(v) == {'qualification_artifact', 'length'}:
+                raw = files['qualification/' + v['qualification_artifact']]
+                if digest(raw) != v['qualification_artifact'] or len(raw) != v['length']:
+                    raise Invalid('binary qualification link')
+                return raw
+            if set(v) == {'artifact', 'length', 'sha256'}:
+                if '/' in v['artifact']:
+                    raise Invalid('binary capture link path')
+                raw = files[prefix + v['artifact']]
+                if len(raw) != v['length'] or digest(raw) != v['sha256']:
+                    raise Invalid('binary capture link')
+                return raw
+            return {k: decode(x) for k, x in v.items()}
+        if type(v) is list:
+            return [decode(x) for x in v]
+        return v
+    def chunks(v):
+        return tuple(Chunk(**c) for c in v)
+    def texts(v):
+        return tuple(TextCapture(**c) for c in v)
+    def stop(v):
+        v['reads'] = tuple(Read(**r) for r in v['reads'])
+        v['roots'] = tuple(v['roots'])
+        return Stop(**v)
+    from .real_receipt_observation import Derivation
+    p = decode(parse(files[prefix + 'admission.json']))
+    p['transcript'] = chunks(p['transcript'])
+    p['text_captures'] = texts(p['text_captures'])
+    p['native_derivation'] = tuple(p['native_derivation'])
+    p['native_controls'] = tuple(p['native_controls'])
+    p['ready'] = stop(p['ready'])
+    p['derivation']['sites'] = tuple(p['derivation']['sites'])
+    p['derivation'] = Derivation(**p['derivation'])
+    o = decode(parse(files[attempt.path.name + '/capture.json']))
+    o['transcript'] = chunks(o['transcript'])
+    o['text_captures'] = texts(o['text_captures'])
+    o['maps'] = tuple(o['maps'])
+    o['guard_operations'] = tuple(o['guard_operations'])
+    o['native_stops'] = tuple(o['native_stops'])
+    return Preparation(**p), Observation(**o)
+
+
+def validate_controls(p):
+    """Independent native launcher control records; descriptors alone do not qualify.
+
+    These captures remain conditional on their collector/host provenance. Offline
+    validation checks actual wait, programming results and native register values.
+    """
+    records = p.native_controls
+    if type(records) is not tuple or len(records) != 6:
+        raise Invalid('missing native control capture')
+    exec_, write0, hit0, write1, hit1, restop = records
+    common = dict(pid=p.custody['pid'], tid=p.custody['tid'],
+                  source='independent-native-control-capture')
+    if canonical(exec_) != canonical(dict(**common, event='exec', wait_status=(4 << 16) | (5 << 8) | 0x7f)):
+        raise Invalid('native exec-event status')
+    for i, (write, hit) in enumerate(((write0, hit0), (write1, hit1))):
+        pc = p.admission['controls'][i]['site']
+        if canonical(write) != canonical(dict(**common, event='program', request='PTRACE_POKEUSER', slot=i, address=pc,
+                         dr7_enable=1 << (2 * i), rw_len=0, result=0)):
+            raise Invalid('native hardware programming result')
+        if canonical(hit) != canonical(dict(**common, event='hardware-stop', slot=i, wait_status=(5 << 8) | 0x7f,
+                       siginfo_code=4, dr6=1 << i, register_read='PTRACE_GETREGSET', rip=pc)):
+            raise Invalid('native effective execute-slot trap')
+    if canonical(restop) != canonical(dict(**common, event='closed-gate-restop', wait_status=(5 << 8) | 0x7f,
+                      register_read='PTRACE_GETREGSET', rip=p.ready.registers['rip'],
+                      gate_frames_received=0)):
+        raise Invalid('closed-gate native restop')
+    return dict(exec=exec_['wait_status'] >> 16 == 4,
+                writes=[r['slot'] for r in (write0, write1) if r['result'] == 0],
+                slots=[r['slot'] for r in (hit0, hit1)],
+                hardware_traps=[r['slot'] for r in (hit0, hit1) if r['siginfo_code'] == 4],
+                restop=restop['gate_frames_received'] == 0)

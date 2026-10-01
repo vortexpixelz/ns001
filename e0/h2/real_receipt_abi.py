@@ -151,16 +151,22 @@ class Decoder:
             raise Invalid('dict layout')
         slots, indexbytes = 1 << logsize, 1 << logbytes
         width = indexbytes // slots
-        if width not in (1, 2, 4, 8) or width * slots != indexbytes:
+        expected_width = 1 if slots <= 128 else 2 if slots <= 32768 else 4 if slots <= 2**31 else 8
+        if width != expected_width or width * slots != indexbytes:
             raise Invalid('dict index width')
         indices = self.s.read(k + 32, indexbytes)
         active_indices = []
+        empty = 0
         for i in range(0, len(indices), width):
             x = int.from_bytes(indices[i:i + width], 'little', signed=True)
             if not -2 <= x < n:
                 raise Invalid('dict index range')
+            if x == -1:
+                empty += 1
             if x >= 0:
                 active_indices.append(x)
+        if not empty:
+            raise Invalid('dict requires empty lookup terminator')
         if len(set(active_indices)) != len(active_indices):
             raise Invalid('duplicate dict index')
         entries = k + 32 + indexbytes

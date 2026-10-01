@@ -3,8 +3,8 @@ import copy
 from dataclasses import replace
 import json
 from pathlib import Path
-from e0.h2.real_receipt_policy import ENGINE, Q1, READBACKS, PARAMETERS, PROFILE, canonical, digest, mi_command, initialization_plan
-from e0.h2.real_receipt_integration import Chunk, Preparation, Observation, qualification_material
+from e0.h2.real_receipt_policy import ENGINE, Q1, READBACKS, PARAMETERS, PROFILE, canonical, digest, mi_command, initialization_plan, parse
+from e0.h2.real_receipt_integration import Chunk, Preparation, Observation, qualification_material, TextCapture, text_maps
 from test_e0_h2_real_receipt import expectation, native_memory, capture, B, C, M
 
 
@@ -38,13 +38,26 @@ def preparation(x):
     q1['outputs']['show auto-load'] = {'facilities': [dict(name=n,
         prefix=('auto-load ' + n + ' : ').encode().hex(), suffix=b'\n'.hex())
         for n in ('gdb-scripts', 'guile-scripts', 'libthread-db', 'local-gdbinit', 'python-scripts')]}
+    # Complete bounded synthetic code ranges, with the actual fixed site bytes.
+    code = bytearray(0x302fbc - 0x020000 + 1)
+    code[0x581feb - 0x420000:0x581feb - 0x420000 + 2] = bytes.fromhex('ffd0')
+    code[0x69bff0 - 0x420000:0x69bff0 - 0x420000 + 4] = bytes.fromhex('f30f1efa')
+    raw_text = {'launcher': b'ABCDE', 'executable': bytes(code), 'loader': b'FGHIJ'}
     ranges = [dict(role=r, file_offset=0x020000 if r == 'executable' else 0,
-        length=0x302fbc - 0x020000 + 1 if r == 'executable' else 5,
-        reference_sha256=digest(('synthetic-full-text-measurement:' + r).encode()))
-        for r in ('launcher', 'executable', 'loader')]
-    qual = dict(text_ranges=ranges, trap_policy=native_reasons)
+        length=len(raw_text[r]), address=0x420000 if r == 'executable' else 0x800000 if r == 'launcher' else 0x900000,
+        load_bias=0, image_sha256=ENGINE['sha256'] if r == 'executable' else
+            ENGINE['loader_sha256'] if r == 'loader' else digest(raw_text[r]),
+        reference_sha256=digest(raw_text[r])) for r in ('launcher', 'executable', 'loader')]
+    setup_path = [dict(command='-exec-continue', reason=reason, pc=pc,
+        trap='SIGTRAP-native-qualified', mechanism='x86-debug-execute') for pc, reason in
+        ((0x4f6102, 'breakpoint-hit'), (0x4f621f, 'syscall-entry'), (0x4f6224, 'syscall-return'),
+         (0x4f6224, 'breakpoint-hit'), (0x4f6274, 'breakpoint-hit'), (0x4f6299, 'breakpoint-hit'),
+         (0x581feb, 'breakpoint-hit'))]
+    qual = dict(text_ranges=ranges, trap_policy=native_reasons, setup_path=setup_path)
     artifacts = dict(cap.artifacts)
-    artifacts.update(bootstrap=canonical(bootstrap), guard=canonical(guard), q1=canonical(q1), qualification=canonical(qual))
+    artifacts.update(bootstrap=canonical(bootstrap), guard=canonical(guard), q1=canonical(q1))
+    qual['tool_roles'] = {r: digest(raw) for r, raw in artifacts.items() if r != 'qualification'}
+    artifacts['qualification'] = canonical(qual)
     pins = {r: digest(raw) for r, raw in artifacts.items()}
     e = expectation()
     e.update(bootstrap_sha256=pins['bootstrap'], observer_sha256=pins['controller'], qualification_sha256=pins['qualification'])
@@ -55,6 +68,7 @@ def preparation(x):
     directory = Path(__file__).resolve().parents[1] / 'docs/e0/h2'
     docs = {digest(raw): raw for name in names for raw in
             [(directory / ('NS-001_H2A2_REAL_CPYTHON_' + name + '_v0.1.md')).read_bytes()]}
+    docs.update({digest(raw): raw for raw in raw_text.values()})
     build = canonical(ENGINE)
     e['engine']['build_sha256'] = digest(build)
     docs[digest(build)] = build
@@ -72,7 +86,7 @@ def preparation(x):
         syscall=['PTRACE_SYSCALL_ENTRY', 'PTRACE_SYSCALL_EXIT'],
         step=dict(**{'from': 0x581feb, 'to': 0x69bff0}, instruction='ffd0', stack_delta=-8,
                   return_pc=0x581fed, receiver_slot='armed', mode='in-place-one-step'),
-        text=[dict(**r, supervisor_sha256=r['reference_sha256'], mi_sha256=r['reference_sha256'], writable_executable=False) for r in ranges],
+        text=[dict(**{k: r[k] for k in ('role', 'file_offset', 'length', 'reference_sha256')}, supervisor_sha256=r['reference_sha256'], mi_sha256=r['reference_sha256'], writable_executable=False) for r in ranges],
         death=['controller-loss-kills-gdb', 'gdb-loss-kills-child', 'parent-checks-match'], task_ids=[401])
     transcript = []
     for i, show in enumerate(READBACKS, 1):
@@ -82,10 +96,52 @@ def preparation(x):
         transcript += [Chunk('commands', mi_command(i, '-interpreter-exec console ' + json.dumps(show))),
             Chunk('stdout', ('~' + _mi(output) + '\n').encode()),
             Chunk('stdout', f'{i}^done\n'.encode())]
+    text_captures = make_text_captures(ranges, raw_text, ('launcher', 'post-exec', 'ready'))
+    # Raw setup stops and independent native records must both cover every link.
+    transcript += [Chunk('commands', mi_command(30, '-break-insert -h *0x69bff0')),
+        Chunk('stdout', b'30^done,bkpt={number="1",type="hw breakpoint",enabled="y",addr="0x69bff0"}\n')]
+    transcript.append(Chunk('stdout', b'=thread-group-started,id="i1",pid="401"\n=thread-created,id="401",group-id="i1"\n'))
+    raw_stops = []
+    base = dict(cap.caller.registers)
+    from e0.h2.real_receipt_abi import Read
+    d = cap.derivation
+    stack, rbp = 0x31000, 0x32038
+    measurements = [
+        ({**base, 'rip': 0x4f6102, 'rdi': d.fd, 'rsi': 3, 'rdx': 0, 'rsp': stack},
+            (Read(stack, 8, d.return_pc_in.to_bytes(8, 'little')),)),
+        ({**base, 'rip': 0x4f621f, 'rax': 17, 'rdi': d.fd, 'rsi': d.original_buffer, 'rdx': 3, 'r10': 0, 'rbp': rbp},
+            (Read(d.original_buffer, 2, d.syscall_capture), Read(rbp - 0x38, 8, (d.original_buffer - 32).to_bytes(8, 'little')))),
+        ({**base, 'rip': 0x4f6224, 'rax': 2, 'rdi': d.fd, 'rsi': d.original_buffer, 'rdx': 3, 'r10': 0},
+            (Read(d.original_buffer, 2, d.syscall_capture),)),
+        ({**base, 'rip': 0x4f6224, 'rax': 2}, (Read(d.original_buffer, 2, d.syscall_capture),)),
+        ({**base, 'rip': 0x4f6274, 'rbp': rbp}, (Read(rbp - 0x38, 8, B.to_bytes(8, 'little')),
+            next(r for r in ready.reads if r.address == B))),
+        ({**base, 'rip': 0x4f6299, 'rax': B, 'rsp': stack},
+            (Read(stack, 8, d.return_pc_out.to_bytes(8, 'little')), next(r for r in ready.reads if r.address == B))),
+        (ready.registers, ready.reads),
+    ]
+    token = 31
+    for binding, (regs, reads) in zip(setup_path, measurements):
+        raw_stops.append(dict(token=token, pid=401, tid=401, pc=regs['rip'], signal='SIGTRAP',
+            mechanism=binding['mechanism'], trap=binding['trap'], registers=regs,
+            reads=[dict(address=r.address, requested=r.requested, hex=r.data.hex()) for r in reads],
+            source='independent-native-stop-capture'))
+        token = append_stop(transcript, token, binding['command'], binding['reason'], regs, reads)
+    transcript += [Chunk('commands', mi_command(token, '-break-insert -h *0x581feb')),
+        Chunk('stdout', (f'{token}^done,bkpt={{number="2",type="hw breakpoint",enabled="y",addr="0x581feb"}}\n').encode())]
+    common = dict(pid=401, tid=401, source='independent-native-control-capture')
+    native_controls = [dict(**common, event='exec', wait_status=(4 << 16) | (5 << 8) | 0x7f)]
+    for i, pc in enumerate((0x581feb, 0x69bff0)):
+        native_controls += [dict(**common, event='program', request='PTRACE_POKEUSER', slot=i, address=pc,
+            dr7_enable=1 << (2 * i), rw_len=0, result=0),
+            dict(**common, event='hardware-stop', slot=i, wait_status=(5 << 8) | 0x7f,
+                siginfo_code=4, dr6=1 << i, register_read='PTRACE_GETREGSET', rip=pc)]
+    native_controls.append(dict(**common, event='closed-gate-restop', wait_status=(5 << 8) | 0x7f,
+        register_read='PTRACE_GETREGSET', rip=ready.registers['rip'], gate_frames_received=0))
     protected = dict(attempt_id=x, identity=cap.derivation.a_identity, kind='regular-memfd', size=2,
                      seals=15, writable_mappings=0, origin='exclusive-fresh-acquisition')
     return e, Preparation(copy.deepcopy(ENGINE), pins, artifacts, custody, bootstrap, guard, q1,
-        admission, ready, cap.derivation, protected, b'#\n', tuple(transcript), docs)
+        admission, ready, cap.derivation, protected, b'#\n', tuple(transcript), docs, text_captures, tuple(raw_stops), tuple(native_controls))
 
 
 def observation(p, x, e, attempted, mutate_memory=None, mutate_regs=None):
@@ -121,9 +177,43 @@ def observation(p, x, e, attempted, mutate_memory=None, mutate_regs=None):
             token += 1
     return Observation(tuple(chunks), dict(attempt_id=x, expectation_sha256=digest(canonical(e)), attempted_sha256=attempted,
         frame_count=1, gate='released-once-after-fsync'), copy.deepcopy(capture().completion), b'#\n',
-        copy.deepcopy(p.protected), (canonical(p.admission['text']), canonical(p.admission['text'])),
-        native_stops=tuple(native_stops))
+        copy.deepcopy(p.protected), tuple(text_maps(make_text_captures(
+            parse(p.artifacts['qualification'])['text_ranges'],
+            {c.role: c.raw for c in p.text_captures}, ('caller', 'receiver')), epoch) for epoch in ('caller', 'receiver')),
+        native_stops=tuple(native_stops), text_captures=make_text_captures(
+            parse(p.artifacts['qualification'])['text_ranges'],
+            {c.role: c.raw for c in p.text_captures}, ('caller', 'receiver')))
 
 
 def freeze(store, e, p):
     store.freeze(e, qualification_material(p))
+
+
+def make_text_captures(ranges, raw_text, epochs):
+    return tuple(TextCapture(epoch, r['role'], dict(start=r['address'], end=r['address'] + r['length'],
+        file_offset=r['file_offset'], device=1, inode=1 + i, handle='synthetic-open-' + r['role'],
+        load_bias=r['load_bias'], pid=401, tid=401, source='independent-supervisor-unmasked-read',
+        image_sha256=r['image_sha256']), raw_text[r['role']])
+        for epoch in epochs for i, r in enumerate(ranges)
+        if r['role'] in (('launcher', 'loader') if epoch == 'launcher' else ('executable', 'loader')))
+
+
+def append_stop(chunks, token, command, reason, regs, reads):
+    chunks += [Chunk('commands', mi_command(token, command)),
+        Chunk('stdout', f'{token}^running\n'.encode()),
+        Chunk('stdout', ('*running,thread-id="all"\n*stopped,reason=' + _mi(reason) +
+            ',thread-id="401",stopped-threads="all",frame=' + _mi({'addr': hex(regs['rip'])}) + '\n').encode())]
+    token += 1
+    names = list(regs)
+    chunks += [Chunk('commands', mi_command(token, '-data-list-register-names')),
+        Chunk('stdout', (f'{token}^done,register-names=' + _mi(names) + '\n').encode())]
+    token += 1
+    chunks += [Chunk('commands', mi_command(token, '-data-list-register-values x')),
+        Chunk('stdout', (f'{token}^done,register-values=' + _mi([dict(number=str(i), value=hex(regs[n])) for i, n in enumerate(names)]) + '\n').encode())]
+    token += 1
+    for read in reads:
+        chunks += [Chunk('commands', mi_command(token, f'-data-read-memory-bytes 0x{read.address:x} {read.requested}')),
+            Chunk('stdout', (f'{token}^done,memory=' + _mi([dict(begin=hex(read.address), offset='0x0',
+                end=hex(read.address + read.requested), contents=read.data.hex())]) + '\n').encode())]
+        token += 1
+    return token
