@@ -610,7 +610,7 @@ def decode_observation(p, observation, x, e, attempted):
     settings = setup.readbacks(p.q1)
     references = parse(p.artifacts['qualification'])
     setup_facts = validate_setup(p, setup, references)
-    hardware_facts = validate_hardware_history(setup, transcript, references)
+    hardware_facts = validate_hardware_history(setup, transcript, references, p.custody)
     controls = validate_controls(p)
     facts = {
         'before_inferior': not any(i <= setup_facts['policy_end'] and r.kind in
@@ -1226,12 +1226,31 @@ def reconcile_mi_text(transcript, captures, epochs):
     return True
 
 
-def validate_hardware_history(setup, observation, references):
+def validate_hardware_history(setup, observation, references, custody):
     """Replay successful retained control results across setup and receipt phases.
 
     Temporary sites follow the frozen sequential phases, including the return
     site spanning syscall stops. Receiver retirement is never reversible.
     """
+    # Retain scope with each active site: dropping it would allow contradictory
+    # MI thread restrictions to be replaced by admitted/native expected values.
+    first = setup.stop_data.get(0, {})
+    group = first.get('threads', {}).get(custody['tid'])
+    if group is None or first.get('groups', {}).get(group) != custody['pid']:
+        raise Invalid('hardware scope without admitted process/thread custody')
+
+    def site(bkpt):
+        address = _hex(bkpt.get('addr'))
+        thread = _decimal(bkpt['thread']) if 'thread' in bkpt else None
+        groups = bkpt.get('thread-groups')
+        if (thread is not None and thread != custody['tid'] or
+                groups is not None and groups != [group] or 'task' in bkpt):
+            raise Invalid('hardware scope excludes admitted receipt thread/process')
+        return address, thread, tuple(groups) if groups is not None else None
+
+    def addresses():
+        return {value[0] for value in active.values()}
+
     active, used = {}, set()
     receiver_id = None
     count = 0
@@ -1247,8 +1266,9 @@ def validate_hardware_history(setup, observation, references):
                 cmd = transcript.commands[rec.token]
                 if cmd.startswith('-break-insert -h *'):
                     bkpt = rec.fields['bkpt']
-                    number, address = _decimal(bkpt['number']), _hex(bkpt['addr'])
-                    if not number or number in used or address in active.values():
+                    number, scoped_site = _decimal(bkpt['number']), site(bkpt)
+                    address = scoped_site[0]
+                    if not number or number in used or address in addresses():
                         raise Invalid('duplicate/reused hardware identity/site')
                     if observing:
                         raise Invalid('hardware insertion after READY')
@@ -1261,7 +1281,7 @@ def validate_hardware_history(setup, observation, references):
                             raise Invalid('caller before derivation retirement')
                     elif count >= len(temporary) or address != temporary[count]:
                         raise Invalid('hardware site outside frozen derivation phase')
-                    active[number] = address
+                    active[number] = scoped_site
                     used.add(number)
                     if len(active) > 2:
                         raise Invalid('hardware slot budget')
@@ -1283,7 +1303,7 @@ def validate_hardware_history(setup, observation, references):
                         n = _decimal(b.get('number'))
                         if n in measured:
                             raise Invalid('duplicate inventory')
-                        measured[n] = _hex(b.get('addr'))
+                        measured[n] = site(b)
                     if measured != active:
                         raise Invalid('hardware inventory disagreement')
                 elif cmd.startswith('-exec-'):
@@ -1293,13 +1313,15 @@ def validate_hardware_history(setup, observation, references):
                         raise Invalid('unarmed receiver during execution')
                     permitted = ({ENGINE['receiver'], ENGINE['caller']} if observing else
                         {ENGINE['receiver']} | ({temporary[count]} if temporary[count] is not None else set()))
-                    if set(active.values()) != permitted:
+                    if addresses() != permitted:
                         raise Invalid('incomplete/unretired phase hardware inventory')
             elif rec.kind == '*stopped' and not observing:
                 count += 1
-        if set(active.values()) != {ENGINE['receiver'], ENGINE['caller']}:
+        if addresses() != {ENGINE['receiver'], ENGINE['caller']}:
             raise Invalid('READY/receipt hardware inventory')
-    return dict(monitor_armed=receiver_id in active, active_count=len(active))
+    return dict(monitor_armed=receiver_id in active and
+        active[receiver_id][1] in (None, custody['tid']) and
+        active[receiver_id][2] in (None, (group,)), active_count=len(active))
 
 
 def validate_setup(p, transcript, references):
@@ -1309,7 +1331,7 @@ def validate_setup(p, transcript, references):
     the caller's Derivation descriptor cannot supply missing measurements.
     """
     path = references['setup_path']
-    hardware = validate_hardware_history(transcript, None, references)
+    hardware = validate_hardware_history(transcript, None, references, p.custody)
     reconcile_mi_text(transcript, p.text_captures, ('post-exec',) * 6 + ('ready',))
     if len(path) != 7 or len(transcript.stops) != len(path) or len(p.native_derivation) != len(path):
         raise Invalid('incomplete/unexpected setup stop history')
